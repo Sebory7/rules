@@ -1,4 +1,4 @@
-name: Sync FakeIPFilter-!cn to MRS
+name: Sync FakeIPFilter-no-cn to MRS
 
 on:
   schedule:
