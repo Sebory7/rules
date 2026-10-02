@@ -1,0 +1,187 @@
+name: Sync CustomAD IP Rules to MRS
+
+on:
+  schedule:
+    - cron: "50 3 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ==========================================
+      # 1. Checkout
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 2. Restore existing Mihomo
+      # ==========================================
+      - name: Restore Mihomo from Cache
+        id: mihomo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .mihomo
+          key: mihomo-linux-amd64-compatible-
+          restore-keys: |
+            mihomo-linux-amd64-compatible-
+
+      # ======= Search for this prefix to find the latest Cache ==========
+
+      # ==========================================
+      # 3. Download Mihomo only if Cache is missing
+      # ==========================================
+      - name: Download latest Mihomo
+        if: steps.mihomo-cache.outputs.cache-matched-key == ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          mkdir -p .mihomo
+
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name')
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "ERROR: Failed to get Mihomo version."
+            exit 1
+          fi
+
+          echo "Latest Mihomo: $VERSION"
+
+          URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+
+          echo "Download URL: $URL"
+
+          curl -fL --retry 3 --retry-delay 2 \
+            "$URL" \
+            -o .mihomo/mihomo.gz
+
+          test -s .mihomo/mihomo.gz
+
+          gunzip -f .mihomo/mihomo.gz
+
+          chmod +x .mihomo/mihomo
+
+          .mihomo/mihomo -v
+
+      # ==========================================
+      # 4. Verify Mihomo
+      # ==========================================
+      - name: Verify Mihomo
+        shell: bash
+        run: |
+          set -e
+
+          test -x .mihomo/mihomo
+
+          .mihomo/mihomo -v
+
+      # ==========================================
+      # 5. Prepare directories
+      # ==========================================
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p tmp
+          mkdir -p ruleset
+
+      # ==========================================
+      # 6. Download CustomAD-ipcidr.list
+      # ==========================================
+      - name: Download CustomAD-ipcidr.list
+        shell: bash
+        run: |
+          set -e
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
+            "https://raw.githubusercontent.com/Sebory7/rules/main/list/CustomAD-ipcidr.list" \
+            -o tmp/CustomAD-ipcidr.list
+
+          test -s tmp/CustomAD-ipcidr.list
+
+          echo "CustomAD-ipcidr.list downloaded."
+
+          echo "File size:"
+          ls -lh tmp/CustomAD-ipcidr.list
+
+          echo "First lines:"
+          head -20 tmp/CustomAD-ipcidr.list
+
+      # ==========================================
+      # 7. Convert CustomAD-ipcidr.list -> MRS
+      # ==========================================
+      - name: Convert CustomAD-ipcidr.list to MRS
+        shell: bash
+        run: |
+          set -e
+
+          rm -f ruleset/CustomAD-ipcidr.mrs
+
+          .mihomo/mihomo convert-ruleset \
+            ipcidr \
+            text \
+            tmp/CustomAD-ipcidr.list \
+            ruleset/CustomAD-ipcidr.mrs
+
+          test -s ruleset/CustomAD-ipcidr.mrs
+
+          echo "MRS generated successfully."
+
+          ls -lh ruleset/CustomAD-ipcidr.mrs
+
+      # ==========================================
+      # 8. Validate
+      # ==========================================
+      - name: Validate MRS
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -s ruleset/CustomAD-ipcidr.mrs ]; then
+            echo "ERROR: ruleset/CustomAD-ipcidr.mrs is empty or missing!"
+            exit 1
+          fi
+
+          echo "CustomAD-ipcidr.mrs validation passed."
+
+          ls -lh ruleset/CustomAD-ipcidr.mrs
+
+      # ==========================================
+      # 9. Commit and push
+      # ==========================================
+      - name: Commit changes
+        shell: bash
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add ruleset/CustomAD-ipcidr.mrs
+
+          if git diff --cached --quiet; then
+            echo "ruleset/CustomAD-ipcidr.mrs has not changed."
+            exit 0
+          fi
+
+          git commit \
+            -m "chore: update CustomAD-ipcidr.mrs"
+
+          git push
