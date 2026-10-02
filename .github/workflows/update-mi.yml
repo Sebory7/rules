@@ -1,0 +1,99 @@
+name: Update Mihomo Cache
+
+on:
+  schedule:
+    - cron: "0 4 */7 * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ==========================================
+      # 1. Get latest Mihomo version
+      # ==========================================
+      - name: Get latest Mihomo version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name')
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "ERROR: Failed to get Mihomo version."
+            exit 1
+          fi
+
+          echo "Latest Mihomo: $VERSION"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # ==========================================
+      # 2. Restore this version if already cached
+      # ==========================================
+      - name: Restore Mihomo Cache
+        id: mihomo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .mihomo
+          key: mihomo-linux-amd64-compatible-${{ steps.version.outputs.version }}
+
+      # ==========================================
+      # 3. Download latest Mihomo
+      # ==========================================
+      - name: Download latest Mihomo
+        if: steps.mihomo-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          mkdir -p .mihomo
+
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name')
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "ERROR: Failed to get Mihomo version."
+            exit 1
+          fi
+
+          echo "Latest Mihomo: $VERSION"
+
+          URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+          echo "Download URL: $URL"
+
+          curl -fL --retry 3 --retry-delay 2 "$URL" -o .mihomo/mihomo.gz
+
+          test -s .mihomo/mihomo.gz
+          gunzip -f .mihomo/mihomo.gz
+          chmod +x .mihomo/mihomo
+
+          .mihomo/mihomo -v
+
+      # ==========================================
+      # 4. Save Mihomo Cache
+      # ==========================================
+      - name: Save Mihomo Cache
+        if: steps.mihomo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .mihomo
+          key: mihomo-linux-amd64-compatible-${{ steps.version.outputs.version }}
