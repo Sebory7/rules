@@ -2,7 +2,7 @@ name: Sync UnBan Rules to MRS
 
 on:
   schedule:
-    - cron: "30 3 * * *"
+    - cron: "30 0 * * *"
 
   workflow_dispatch:
 
