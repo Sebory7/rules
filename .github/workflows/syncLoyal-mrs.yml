@@ -97,7 +97,6 @@ jobs:
             ruleset/direct.mrs
 
           test -s ruleset/direct.mrs
-          echo "Conversion completed."
 
           ls -lh ruleset/direct.mrs
 
