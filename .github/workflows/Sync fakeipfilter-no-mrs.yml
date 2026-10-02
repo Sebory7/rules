@@ -1,5 +1,4 @@
-```yaml
-name: Sync FakeIPFilter-@cn to MRS
+name: Sync FakeIPFilter-!cn to MRS
 
 on:
   schedule:
