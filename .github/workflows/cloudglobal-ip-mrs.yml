@@ -1,0 +1,154 @@
+name: Convert CloudGlobal IP to MRS
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # Restore Mihomo cache
+      # ============================================================
+      - name: Restore Mihomo cache
+        id: mihomo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .mihomo
+          key: mihomo-linux-amd64-compatible-${{ vars.MIHOMO_VERSION }}
+          restore-keys: |
+            mihomo-linux-amd64-compatible-
+
+      # ============================================================
+      # Download Mihomo when cache is unavailable
+      # ============================================================
+      - name: Download Mihomo
+        if: steps.mihomo-cache.outputs.cache-matched-key == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p .mihomo
+
+          VERSION="${{ vars.MIHOMO_VERSION }}"
+
+          if [ -z "$VERSION" ]; then
+            echo "MIHOMO_VERSION is not set."
+            exit 1
+          fi
+
+          URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+
+          echo "Downloading Mihomo ${VERSION}"
+          echo "$URL"
+
+          curl -fL --retry 3 \
+            "$URL" \
+            -o .mihomo/mihomo.gz
+
+          gzip -dc .mihomo/mihomo.gz > .mihomo/mihomo
+          rm -f .mihomo/mihomo.gz
+
+          chmod +x .mihomo/mihomo
+
+      # ============================================================
+      # Verify Mihomo
+      # ============================================================
+      - name: Verify Mihomo
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -x .mihomo/mihomo
+
+          .mihomo/mihomo version
+
+      # ============================================================
+      # Prepare directories
+      # ============================================================
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p tmp
+          mkdir -p ruleset
+
+      # ============================================================
+      # Download CloudGlobal IP YAML
+      # ============================================================
+      - name: Download CloudGlobal IP YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Cloud/CloudGlobal/CloudGlobal_IP.yaml" \
+            -o tmp/CloudGlobal_IP.yaml
+
+          test -s tmp/CloudGlobal_IP.yaml
+
+          echo "Downloaded:"
+          wc -l tmp/CloudGlobal_IP.yaml
+          head -20 tmp/CloudGlobal_IP.yaml
+
+      # ============================================================
+      # Convert YAML -> MRS
+      # ============================================================
+      - name: Convert CloudGlobal IP to MRS
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          .mihomo/mihomo convert-ruleset \
+            ipcidr \
+            yaml \
+            tmp/CloudGlobal_IP.yaml \
+            ruleset/CloudGlobal_IP.mrs
+
+          test -s ruleset/CloudGlobal_IP.mrs
+
+          ls -lh ruleset/CloudGlobal_IP.mrs
+
+      # ============================================================
+      # Validate MRS
+      # ============================================================
+      - name: Validate MRS
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f ruleset/CloudGlobal_IP.mrs
+          test "$(stat -c%s ruleset/CloudGlobal_IP.mrs)" -gt 0
+
+          file ruleset/CloudGlobal_IP.mrs
+
+      # ============================================================
+      # Commit and push only when changed
+      # ============================================================
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add ruleset/CloudGlobal_IP.mrs
+
+          if git diff --cached --quiet; then
+            echo "CloudGlobal_IP.mrs has not changed."
+            exit 0
+          fi
+
+          git commit -m "Update CloudGlobal_IP.mrs"
+          git push
