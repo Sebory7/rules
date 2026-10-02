@@ -1,0 +1,202 @@
+
+```yaml
+name: Sync ACL4SSR UnBan to MRS
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ==========================================
+      # 1. Checkout
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 2. Prepare directories
+      # ==========================================
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p ruleset
+          mkdir -p tmp
+
+      # ==========================================
+      # 3. Download ACL4SSR UnBan.list
+      # ==========================================
+      - name: Download UnBan.list
+        shell: bash
+        run: |
+          set -e
+
+          curl -fL \
+            "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/UnBan.list" \
+            -o tmp/UnBan.list
+
+          test -s tmp/UnBan.list
+
+      # ==========================================
+      # 4. Convert ACL4SSR classical rules
+      #    to Mihomo domain text format
+      #
+      #    DOMAIN,example.com
+      #      -> full:example.com
+      #
+      #    DOMAIN-SUFFIX,example.com
+      #      -> +.example.com
+      # ==========================================
+      - name: Convert UnBan.list to domain text
+        shell: bash
+        run: |
+          set -e
+
+          awk -F',' '
+            /^[[:space:]]*DOMAIN-SUFFIX,/ {
+              gsub(/\r/, "", $2)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+              print "+." $2
+              next
+            }
+
+            /^[[:space:]]*DOMAIN,/ {
+              gsub(/\r/, "", $2)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+              print "full:" $2
+              next
+            }
+          ' tmp/UnBan.list > tmp/UnBan.domain.txt
+
+          test -s tmp/UnBan.domain.txt
+
+          echo "Generated domain rules:"
+          cat tmp/UnBan.domain.txt
+
+      # ==========================================
+      # 5. Download latest Mihomo
+      # ==========================================
+      - name: Download latest Mihomo
+        shell: bash
+        run: |
+          set -e
+
+          API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+
+          DOWNLOAD_URL="$(
+            curl -fsSL "$API_URL" |
+            jq -r '
+              .assets[]
+              | select(.name | test("^mihomo-linux-amd64-compatible-v.*\\.gz$"))
+              | .browser_download_url
+            ' |
+            head -n 1
+          )"
+
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "ERROR: Cannot find latest Mihomo linux amd64 compatible release."
+            exit 1
+          fi
+
+          echo "Downloading:"
+          echo "$DOWNLOAD_URL"
+
+          curl -fL "$DOWNLOAD_URL" -o tmp/mihomo.gz
+
+          gunzip -f tmp/mihomo.gz
+
+          chmod +x tmp/mihomo
+
+          ./tmp/mihomo -v
+
+      # ==========================================
+      # 6. Convert domain text to MRS
+      # ==========================================
+      - name: Convert UnBan.domain.txt to UnBan.mrs
+        shell: bash
+        run: |
+          set -e
+
+          ./tmp/mihomo convert-ruleset \
+            domain \
+            text \
+            tmp/UnBan.domain.txt \
+            ruleset/UnBan.mrs
+
+          test -s ruleset/UnBan.mrs
+
+          echo "Generated:"
+          ls -lh ruleset/UnBan.mrs
+
+      # ==========================================
+      # 7. Show generated rule count
+      # ==========================================
+      - name: Verify generated rules
+        shell: bash
+        run: |
+          set -e
+
+          echo "Source rules:"
+          grep -E '^[[:space:]]*DOMAIN(-SUFFIX)?,' tmp/UnBan.list | wc -l
+
+          echo "Converted domain rules:"
+          wc -l < tmp/UnBan.domain.txt
+
+          echo "MRS file:"
+          ls -lh ruleset/UnBan.mrs
+
+      # ==========================================
+      # 8. Remove temporary files
+      # ==========================================
+      - name: Cleanup
+        shell: bash
+        run: |
+          rm -rf tmp
+
+      # ==========================================
+      # 9. Check whether files changed
+      # ==========================================
+      - name: Check changes
+        id: changes
+        shell: bash
+        run: |
+          git add ruleset/UnBan.mrs
+
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ==========================================
+      # 10. Commit
+      # ==========================================
+      - name: Commit changes
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "Update UnBan.mrs"
+
+      # ==========================================
+      # 11. Push
+      # ==========================================
+      - name: Push changes
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git push
+```
