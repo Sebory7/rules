@@ -88,15 +88,18 @@ jobs:
         run: |
           set -e
 
+          rm -f ruleset/direct.mrs
+
           ./mihomo convert-ruleset \
             domain \
             yaml \
-            direct.txt \
-            direct.mrs
+            tmp/direct.txt \
+            ruleset/direct.mrs
 
+          test -s ruleset/direct.mrs
           echo "Conversion completed."
 
-          ls -lh direct.mrs
+          ls -lh ruleset/direct.mrs
 
       # ==========================================
       # 5. Validate
