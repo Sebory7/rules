@@ -1,0 +1,35 @@
+DOMAIN-SUFFIX,speedtest.net
+DOMAIN-SUFFIX,duolingo.com
+DOMAIN-KEYWORD,duolingo
+DOMAIN-SUFFIX,textnow.com
+DOMAIN-SUFFIX,optimizely.com
+DOMAIN-SUFFIX,perfectmoney.com
+DOMAIN-SUFFIX,deepl.com
+
+# Buzz转文字
+DOMAIN-SUFFIX,azureedge.net
+
+# 破解软件
+DOMAIN-SUFFIX,rutracker.org
+DOMAIN-SUFFIX,sourceforge.net
+
+DOMAIN-SUFFIX,bigmodel.cn
+DOMAIN,open.bigmodel.cn
+
+# 仓库
+DOMAIN-SUFFIX,jsdelivr.net
+
+# 小米海外版
+DOMAIN,new.c.mi.com
+DOMAIN,i.mi.com
+DOMAIN-SUFFIX,account.xiaomi.com
+DOMAIN,privacy.mi.com
+DOMAIN,font.sec.miui.com
+DOMAIN,sentry.d.xiaomi.net
+DOMAIN-SUFFIX,c.mi.com
+DOMAIN-SUFFIX,mi-img.com
+DOMAIN-SUFFIX,appmifile.com
+DOMAIN-SUFFIX,api.xiaomi.com
+DOMAIN-SUFFIX,buy.mi.com
+DOMAIN-SUFFIX,xiaomi.com
+DOMAIN-SUFFIX,mi.com
