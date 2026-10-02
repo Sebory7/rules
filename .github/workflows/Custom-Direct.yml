@@ -1,0 +1,214 @@
+name: Sync Custom Direct Rules to MRS
+
+on:
+  schedule:
+    - cron: "55 3 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ==========================================
+      # 1. Checkout
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 2. Restore existing Mihomo
+      # ==========================================
+      - name: Restore Mihomo from Cache
+        id: mihomo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .mihomo
+          key: mihomo-linux-amd64-compatible-
+          restore-keys: |
+            mihomo-linux-amd64-compatible-
+
+      # ======= Search for this prefix to find the latest Cache ==========
+
+      # ==========================================
+      # 3. Download Mihomo only if Cache is missing
+      # ==========================================
+      - name: Download latest Mihomo
+        if: steps.mihomo-cache.outputs.cache-matched-key == ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          mkdir -p .mihomo
+
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name')
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "ERROR: Failed to get Mihomo version."
+            exit 1
+          fi
+
+          echo "Latest Mihomo: $VERSION"
+
+          URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+
+          echo "Download URL: $URL"
+
+          curl -fL --retry 3 --retry-delay 2 \
+            "$URL" \
+            -o .mihomo/mihomo.gz
+
+          test -s .mihomo/mihomo.gz
+
+          gunzip -f .mihomo/mihomo.gz
+
+          chmod +x .mihomo/mihomo
+
+          .mihomo/mihomo -v
+
+      # ==========================================
+      # 4. Verify Mihomo
+      # ==========================================
+      - name: Verify Mihomo
+        shell: bash
+        run: |
+          set -e
+
+          test -x .mihomo/mihomo
+
+          .mihomo/mihomo -v
+
+      # ==========================================
+      # 5. Prepare directories
+      # ==========================================
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p tmp
+          mkdir -p ruleset
+
+      # ==========================================
+      # 6. Download Custom-Direct.list
+      # ==========================================
+      - name: Download Custom-Direct.list
+        shell: bash
+        run: |
+          set -e
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
+            "https://raw.githubusercontent.com/Sebory7/rules/main/list/Custom-Direct.list" \
+            -o tmp/Custom-Direct.list
+
+          test -s tmp/Custom-Direct.list
+
+          echo "Custom-Direct.list downloaded."
+
+          echo "File size:"
+          ls -lh tmp/Custom-Direct.list
+
+          echo "First lines:"
+          head -30 tmp/Custom-Direct.list
+
+      # ==========================================
+      # 7. Convert Clash list -> Mihomo domain YAML
+      # ==========================================
+      - name: Convert Custom-Direct.list to domain YAML
+        shell: bash
+        run: |
+          set -e
+
+          awk -F',' '
+            BEGIN {
+              print "payload:"
+            }
+
+            /^DOMAIN,/ {
+              print "  - '\''" $2 "'\''"
+            }
+
+            /^DOMAIN-SUFFIX,/ {
+              print "  - '\''+" $2 "'\''"
+            }
+          ' tmp/Custom-Direct.list > tmp/Custom-Direct.yaml
+
+          test -s tmp/Custom-Direct.yaml
+
+          echo "Generated domain YAML:"
+          cat tmp/Custom-Direct.yaml
+
+      # ==========================================
+      # 8. Convert domain YAML -> MRS
+      # ==========================================
+      - name: Convert Custom-Direct.yaml to MRS
+        shell: bash
+        run: |
+          set -e
+
+          rm -f ruleset/Custom-Direct.mrs
+
+          .mihomo/mihomo convert-ruleset \
+            domain \
+            yaml \
+            tmp/Custom-Direct.yaml \
+            ruleset/Custom-Direct.mrs
+
+          test -s ruleset/Custom-Direct.mrs
+
+          echo "MRS generated successfully."
+
+          ls -lh ruleset/Custom-Direct.mrs
+
+      # ==========================================
+      # 9. Validate
+      # ==========================================
+      - name: Validate MRS
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -s ruleset/Custom-Direct.mrs ]; then
+            echo "ERROR: ruleset/Custom-Direct.mrs is empty or missing!"
+            exit 1
+          fi
+
+          echo "Custom-Direct.mrs validation passed."
+
+          ls -lh ruleset/Custom-Direct.mrs
+
+      # ==========================================
+      # 10. Commit and push
+      # ==========================================
+      - name: Commit changes
+        shell: bash
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add ruleset/Custom-Direct.mrs
+
+          if git diff --cached --quiet; then
+            echo "ruleset/Custom-Direct.mrs has not changed."
+            exit 0
+          fi
+
+          git commit \
+            -m "chore: update Custom-Direct.mrs"
+
+          git push
