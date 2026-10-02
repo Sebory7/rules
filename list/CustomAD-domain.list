@@ -1,6 +1,8 @@
-+.duba.com # 毒霸
+# 毒霸
++.duba.com 
 +.duba.net
 +.ijinshan.com
+
 +.360.cn
 +.360.com
 +.3360.cn
@@ -10,8 +12,12 @@
 +.api.installer.xiaomi.com
 +.a0.app.xiaomi.com
 +.miav-cse.avlyun.com
-+.tracking.miui.com # 小米 Miui 追踪参数
-app.adjust.com # General
+
+# 小米 Miui 追踪参数
++.tracking.miui.com
+
+# General
+app.adjust.com
 +.1vidow.com
 +.allesgoo.top
 +.llllllll.fun
@@ -24,13 +30,18 @@ adx-os.bridgeturbo.com
 adx-bj.anythinktech.com
 mobads.baidu.com
 +.baidu.com
-appcloud2.in.zhihu.com # ZhihuAds
+
+# ZhihuAds
+appcloud2.in.zhihu.com
 mqtt.zhihu.com
-sugar.zhihu.com # ZhihuAds
-+.mcdn.bilivideo.com # 哔哩哔哩PCDN
+sugar.zhihu.com
+
+# 哔哩哔哩PCDN
++.mcdn.bilivideo.com
 +.mcdn.bilivideo.cn
 +.h2.smtcdns.net
-+.edge.mountaintoys.cn # 哔哩哔哩PCDN
++.edge.mountaintoys.cn
 
-+.adservice.kugou # 酷狗升级
+# 酷狗升级
++.adservice.kugou
 +.tui.kugou.com
