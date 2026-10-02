@@ -10,8 +10,9 @@ DOMAIN,www.asusgo.com
 DOMAIN-SUFFIX,asus.com.cn
 DOMAIN-SUFFIX,asuscomm.com
 
-
+DOMAIN,beacon.qq.com
 DOMAIN,y.qq.com
+DOMAIN-SUFFIX,qq.com
 DOMAIN,image-line.com
 DOMAIN,win10.ipv6.microsoft.com
 DOMAIN,bdtj.tagtic.cn
@@ -20,12 +21,12 @@ DOMAIN-SUFFIX,zol.com.cn
 DOMAIN-SUFFIX,jb51.net
 DOMAIN,antping.com
 DOMAIN-SUFFIX,speedtest.cn
+DOMAIN-SUFFIX,bytecdntp.com
 
 # 小鹅通
 DOMAIN-SUFFIX,xiaoeknow.com
 DOMAIN-SUFFIX,xeknow.com
 DOMAIN-SUFFIX,im.qcloud.com
-DOMAIN-SUFFIX,qq.com
 
 # 游戏下载
 DOMAIN,dl.steam.clngaa.com
