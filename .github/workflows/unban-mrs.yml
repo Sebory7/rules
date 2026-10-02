@@ -1,5 +1,4 @@
 name: Sync UnBan Rules to MRS
-
 on:
   schedule:
     - cron: "30 3 * * *"
