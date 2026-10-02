@@ -29,10 +29,14 @@ jobs:
         run: |
           set -e
 
-          API="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+          VERSION_URL="https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt"
 
-          VERSION=$(curl -fsSL "$API" \
-            | jq -r '.tag_name')
+          VERSION=$(curl -fsSL "$VERSION_URL" | tr -d '\r\n')
+
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Failed to get Mihomo version."
+            exit 1
+          fi
 
           echo "Latest Mihomo: $VERSION"
 
@@ -41,12 +45,19 @@ jobs:
           echo "Download URL:"
           echo "$URL"
 
-          curl -fL "$URL" -o mihomo.gz
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
+            "$URL" \
+            -o mihomo.gz
 
-          gunzip mihomo.gz
+          test -s mihomo.gz
+
+          gunzip -f mihomo.gz
 
           chmod +x mihomo
 
+          echo "========== Mihomo version =========="
           ./mihomo -v
 
       # ==========================================
