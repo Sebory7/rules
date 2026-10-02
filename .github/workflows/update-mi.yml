@@ -1,4 +1,4 @@
-name: Update Mihomo Cache
+name: Update Mi Cache
 
 on:
   schedule:
