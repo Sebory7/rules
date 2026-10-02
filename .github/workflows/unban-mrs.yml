@@ -26,14 +26,18 @@ jobs:
       # ==========================================
       - name: Download latest Mihomo
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
 
-          VERSION_URL="https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt"
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name')
 
-          VERSION=$(curl -fsSL "$VERSION_URL" | tr -d '\r\n')
-
-          if [ -z "$VERSION" ]; then
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
             echo "ERROR: Failed to get Mihomo version."
             exit 1
           fi
@@ -41,23 +45,14 @@ jobs:
           echo "Latest Mihomo: $VERSION"
 
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+          echo "Download URL: $URL"
 
-          echo "Download URL:"
-          echo "$URL"
-
-          curl -fL \
-            --retry 3 \
-            --retry-delay 2 \
-            "$URL" \
-            -o mihomo.gz
+          curl -fL --retry 3 --retry-delay 2 "$URL" -o mihomo.gz
 
           test -s mihomo.gz
-
           gunzip -f mihomo.gz
-
           chmod +x mihomo
 
-          echo "========== Mihomo version =========="
           ./mihomo -v
 
       # ==========================================
