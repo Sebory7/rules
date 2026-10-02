@@ -1,113 +1,144 @@
-name: Convert CloudGlobal IP to MRS
+name: Sync CloudGlobal IP Rules to MRS
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: "30 3 * * *"
+
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  convert:
+  sync:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+
+      # ==========================================
+      # 1. Checkout
+      # ==========================================
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ============================================================
-      # Restore Mihomo cache
-      # ============================================================
-      - name: Restore Mihomo cache
+
+      # ==========================================
+      # 2. Restore existing Mihomo
+      # ==========================================
+      - name: Restore Mihomo from Cache
         id: mihomo-cache
         uses: actions/cache/restore@v4
         with:
           path: .mihomo
-          key: mihomo-linux-amd64-compatible-${{ vars.MIHOMO_VERSION }}
+          key: mihomo-linux-amd64-compatible-
           restore-keys: |
             mihomo-linux-amd64-compatible-
 
-      # ============================================================
-      # Download Mihomo when cache is unavailable
-      # ============================================================
-      - name: Download Mihomo
+      # ======= Search for this prefix to find the latest Cache ==========
+
+
+      # ==========================================
+      # 3. Download Mihomo only if Cache is missing
+      # ==========================================
+      - name: Download latest Mihomo
         if: steps.mihomo-cache.outputs.cache-matched-key == ''
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -e
 
           mkdir -p .mihomo
 
-          VERSION="${{ vars.MIHOMO_VERSION }}"
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name')
 
-          if [ -z "$VERSION" ]; then
-            echo "MIHOMO_VERSION is not set."
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "ERROR: Failed to get Mihomo version."
             exit 1
           fi
 
+          echo "Latest Mihomo: $VERSION"
+
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
 
-          echo "Downloading Mihomo ${VERSION}"
-          echo "$URL"
+          echo "Download URL: $URL"
 
-          curl -fL --retry 3 \
+          curl -fL --retry 3 --retry-delay 2 \
             "$URL" \
             -o .mihomo/mihomo.gz
 
-          gzip -dc .mihomo/mihomo.gz > .mihomo/mihomo
-          rm -f .mihomo/mihomo.gz
+          test -s .mihomo/mihomo.gz
+
+          gunzip -f .mihomo/mihomo.gz
 
           chmod +x .mihomo/mihomo
 
-      # ============================================================
-      # Verify Mihomo
-      # ============================================================
+          .mihomo/mihomo -v
+
+
+      # ==========================================
+      # 4. Verify Mihomo
+      # ==========================================
       - name: Verify Mihomo
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
           test -x .mihomo/mihomo
 
-          .mihomo/mihomo version
+          .mihomo/mihomo -v
 
-      # ============================================================
-      # Prepare directories
-      # ============================================================
+
+      # ==========================================
+      # 5. Prepare directories
+      # ==========================================
       - name: Prepare directories
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
           mkdir -p tmp
           mkdir -p ruleset
 
-      # ============================================================
-      # Download CloudGlobal IP YAML
-      # ============================================================
-      - name: Download CloudGlobal IP YAML
+
+      # ==========================================
+      # 6. Download CloudGlobal_IP.yaml
+      # ==========================================
+      - name: Download CloudGlobal_IP.yaml
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
-          curl -fL --retry 3 \
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
             "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Cloud/CloudGlobal/CloudGlobal_IP.yaml" \
             -o tmp/CloudGlobal_IP.yaml
 
           test -s tmp/CloudGlobal_IP.yaml
 
-          echo "Downloaded:"
-          wc -l tmp/CloudGlobal_IP.yaml
-          head -20 tmp/CloudGlobal_IP.yaml
+          echo "CloudGlobal_IP.yaml downloaded."
 
-      # ============================================================
-      # Convert YAML -> MRS
-      # ============================================================
-      - name: Convert CloudGlobal IP to MRS
+          echo "File size:"
+          ls -lh tmp/CloudGlobal_IP.yaml
+
+          echo "First lines:"
+          head -30 tmp/CloudGlobal_IP.yaml
+
+
+      # ==========================================
+      # 7. Convert YAML -> MRS
+      # ==========================================
+      - name: Convert CloudGlobal_IP.yaml to MRS
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
+
+          rm -f ruleset/CloudGlobal_IP.mrs
 
           .mihomo/mihomo convert-ruleset \
             ipcidr \
@@ -117,28 +148,36 @@ jobs:
 
           test -s ruleset/CloudGlobal_IP.mrs
 
+          echo "CloudGlobal_IP.mrs generated successfully."
+
           ls -lh ruleset/CloudGlobal_IP.mrs
 
-      # ============================================================
-      # Validate MRS
-      # ============================================================
+
+      # ==========================================
+      # 8. Validate
+      # ==========================================
       - name: Validate MRS
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
-          test -f ruleset/CloudGlobal_IP.mrs
-          test "$(stat -c%s ruleset/CloudGlobal_IP.mrs)" -gt 0
+          if [ ! -s ruleset/CloudGlobal_IP.mrs ]; then
+            echo "ERROR: ruleset/CloudGlobal_IP.mrs is empty or missing!"
+            exit 1
+          fi
 
-          file ruleset/CloudGlobal_IP.mrs
+          echo "CloudGlobal_IP.mrs validation passed."
 
-      # ============================================================
-      # Commit and push only when changed
-      # ============================================================
-      - name: Commit and push
+          ls -lh ruleset/CloudGlobal_IP.mrs
+
+
+      # ==========================================
+      # 9. Commit and push
+      # ==========================================
+      - name: Commit changes
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -146,9 +185,11 @@ jobs:
           git add ruleset/CloudGlobal_IP.mrs
 
           if git diff --cached --quiet; then
-            echo "CloudGlobal_IP.mrs has not changed."
+            echo "ruleset/CloudGlobal_IP.mrs has not changed."
             exit 0
           fi
 
-          git commit -m "Update CloudGlobal_IP.mrs"
+          git commit \
+            -m "chore: update CloudGlobal_IP.mrs"
+
           git push
