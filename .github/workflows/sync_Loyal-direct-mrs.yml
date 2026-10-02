@@ -37,7 +37,7 @@ jobs:
       # 3. Download Mihomo only if Cache is missing
       # ==========================================
       - name: Download latest Mihomo
-        if: steps.mihomo-cache.outputs.cache-hit != 'true'
+        if: steps.mihomo-cache.outputs.cache-matched-key == ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
