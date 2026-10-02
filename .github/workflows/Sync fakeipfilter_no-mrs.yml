@@ -1,4 +1,4 @@
-name: Sync FakeIPFilter-no-cn to MRS
+name: Sync fakeipfilter no cn to MRS
 
 on:
   schedule:
@@ -21,6 +21,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
       # ==========================================
       # 2. Restore existing Mihomo
       # ==========================================
@@ -32,6 +33,9 @@ jobs:
           key: mihomo-linux-amd64-compatible-
           restore-keys: |
             mihomo-linux-amd64-compatible-
+
+      # =======Search for this prefix to find the latest Cache==========
+
 
       # ==========================================
       # 3. Download Mihomo only if Cache is missing
@@ -60,20 +64,16 @@ jobs:
           echo "Latest Mihomo: $VERSION"
 
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
-
           echo "Download URL: $URL"
 
-          curl -fL --retry 3 --retry-delay 2 \
-            "$URL" \
-            -o .mihomo/mihomo.gz
+          curl -fL --retry 3 --retry-delay 2 "$URL" -o .mihomo/mihomo.gz
 
           test -s .mihomo/mihomo.gz
-
           gunzip -f .mihomo/mihomo.gz
-
           chmod +x .mihomo/mihomo
 
           .mihomo/mihomo -v
+
 
       # ==========================================
       # 4. Verify Mihomo
@@ -87,6 +87,7 @@ jobs:
 
           .mihomo/mihomo -v
 
+
       # ==========================================
       # 5. Prepare directories
       # ==========================================
@@ -98,10 +99,11 @@ jobs:
           mkdir -p tmp
           mkdir -p ruleset
 
+
       # ==========================================
       # 6. Download fakeipfilter-!cn.list
       # ==========================================
-      - name: Download fakeipfilter-!cn.list
+      - name: Download fakeipfilter no CN list
         shell: bash
         run: |
           set -e
@@ -110,39 +112,41 @@ jobs:
             --retry 3 \
             --retry-delay 2 \
             "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list" \
-            -o "tmp/fakeipfilter-!cn.list"
+            -o tmp/fakeipfilter-no-cn.list
 
-          test -s "tmp/fakeipfilter-!cn.list"
+          test -s tmp/fakeipfilter-no-cn.list
 
-          echo "Source downloaded."
+          echo "fakeipfilter-!cn.list downloaded."
 
           echo "File size:"
-          ls -lh "tmp/fakeipfilter-!cn.list"
+          ls -lh tmp/fakeipfilter-no-cn.list
 
           echo "First lines:"
-          head -30 "tmp/fakeipfilter-!cn.list"
+          head -30 tmp/fakeipfilter-no-cn.list
+
 
       # ==========================================
-      # 7. Convert TEXT -> MRS
+      # 7. Convert LIST -> MRS
       # ==========================================
-      - name: Convert fakeipfilter-!cn.list to MRS
+      - name: Convert fakeipfilter no CN list to MRS
         shell: bash
         run: |
           set -e
 
-          rm -f "ruleset/fakeipfilter-!cn.mrs"
+          rm -f 'ruleset/fakeipfilter-!cn.mrs'
 
           .mihomo/mihomo convert-ruleset \
             domain \
             text \
-            "tmp/fakeipfilter-!cn.list" \
-            "ruleset/fakeipfilter-!cn.mrs"
+            tmp/fakeipfilter-no-cn.list \
+            'ruleset/fakeipfilter-!cn.mrs'
 
-          test -s "ruleset/fakeipfilter-!cn.mrs"
+          test -s 'ruleset/fakeipfilter-!cn.mrs'
 
-          echo "MRS generated successfully."
+          echo "fakeipfilter-!cn.mrs generated successfully."
 
-          ls -lh "ruleset/fakeipfilter-!cn.mrs"
+          ls -lh 'ruleset/fakeipfilter-!cn.mrs'
+
 
       # ==========================================
       # 8. Validate
@@ -152,14 +156,15 @@ jobs:
         run: |
           set -e
 
-          if [ ! -s "ruleset/fakeipfilter-!cn.mrs" ]; then
-            echo "ERROR: MRS is empty or missing!"
+          if [ ! -s 'ruleset/fakeipfilter-!cn.mrs' ]; then
+            echo "ERROR: ruleset/fakeipfilter-!cn.mrs is empty or missing!"
             exit 1
           fi
 
           echo "fakeipfilter-!cn.mrs validation passed."
 
-          ls -lh "ruleset/fakeipfilter-!cn.mrs"
+          ls -lh 'ruleset/fakeipfilter-!cn.mrs'
+
 
       # ==========================================
       # 9. Commit and push
@@ -172,10 +177,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add "ruleset/fakeipfilter-!cn.mrs"
+          git add 'ruleset/fakeipfilter-!cn.mrs'
 
           if git diff --cached --quiet; then
-            echo "MRS has not changed."
+            echo "ruleset/fakeipfilter-!cn.mrs has not changed."
             exit 0
           fi
 
@@ -183,4 +188,3 @@ jobs:
             -m "chore: update fakeipfilter-!cn.mrs"
 
           git push
-```
