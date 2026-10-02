@@ -1,6 +1,7 @@
+# 支持DOMAIN-SUFFIX和DOMAIN，不支持DOMAIN-KEYWORD
+
 DOMAIN-SUFFIX,speedtest.net
 DOMAIN-SUFFIX,duolingo.com
-DOMAIN-KEYWORD,duolingo
 DOMAIN-SUFFIX,textnow.com
 DOMAIN-SUFFIX,optimizely.com
 DOMAIN-SUFFIX,perfectmoney.com
