@@ -1,0 +1,33 @@
+# 只能DOMAIN-SUFFIX和DOMAIN，不能用keyboard
+
+# 小鹅通
+DOMAIN-SUFFIX,xiaoeknow.com
+DOMAIN-SUFFIX,xeknow.com
+DOMAIN-SUFFIX,im.qcloud.com
+DOMAIN-SUFFIX,qq.com
+
+# 华硕
+DOMAIN-SUFFIX,asusgo.com
+DOMAIN,www.asus.com
+DOMAIN,www.asusgo.com
+DOMAIN-SUFFIX,asus.com.cn
+DOMAIN-SUFFIX,asuscomm.com
+
+# 游戏下载
+DOMAIN,dl.steam.clngaa.com
+DOMAIN,xz.sycontroller.com
+DOMAIN,xz.pphimalayanrt.com
+DOMAIN,gstore.val.smogfly.com
+
+# 向日葵
+DOMAIN-SUFFIX,oray.com
+DOMAIN-SUFFIX,orayimg.com
+
+# 知乎
+DOMAIN-SUFFIX,zhihu.com
+
+# 城通网盘
+DOMAIN-SUFFIX,ctfile.com
+DOMAIN-SUFFIX,ctfile.net
+DOMAIN-SUFFIX,n802.com
+DOMAIN-SUFFIX,tv002.com
