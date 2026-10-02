@@ -36,18 +36,7 @@ jobs:
 
           echo "Latest Mihomo: $VERSION"
 
-          URL=$(curl -fsSL "$API" \
-            | jq -r '
-              .assets[]
-              | select(.name | test("linux-amd64-compatible.*gz$"))
-              | .browser_download_url
-            ' \
-            | head -n 1)
-
-          if [ -z "$URL" ]; then
-            echo "Could not find Mihomo Linux amd64 compatible release."
-            exit 1
-          fi
+          URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
 
           echo "Download URL:"
           echo "$URL"
