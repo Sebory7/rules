@@ -1,4 +1,4 @@
-name: Sync ACL4SSR UnBan to MRS
+name: Sync UnBan Rules to MRS
 
 on:
   schedule:
@@ -46,17 +46,13 @@ jobs:
 
           test -s tmp/UnBan.list
 
+          echo "========== UnBan.list =========="
+          cat tmp/UnBan.list
+
       # ==========================================
-      # 4. Convert ACL4SSR classical rules
-      #    to Mihomo domain text format
-      #
-      #    DOMAIN,example.com
-      #      -> full:example.com
-      #
-      #    DOMAIN-SUFFIX,example.com
-      #      -> +.example.com
+      # 4. Convert ACL4SSR rules
       # ==========================================
-      - name: Convert UnBan.list to domain text
+      - name: Convert UnBan.list to Mihomo domain format
         shell: bash
         run: |
           set -e
@@ -65,66 +61,59 @@ jobs:
             /^[[:space:]]*DOMAIN-SUFFIX,/ {
               gsub(/\r/, "", $2)
               gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
-              print "+." $2
+              if ($2 != "")
+                print "+." $2
               next
             }
 
             /^[[:space:]]*DOMAIN,/ {
               gsub(/\r/, "", $2)
               gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
-              print "full:" $2
+              if ($2 != "")
+                print "full:" $2
               next
             }
           ' tmp/UnBan.list > tmp/UnBan.domain.txt
 
           test -s tmp/UnBan.domain.txt
 
-          echo "Generated domain rules:"
+          echo "========== Converted domain rules =========="
           cat tmp/UnBan.domain.txt
+
+          echo "============================================"
+          echo "Rule count:"
+          wc -l tmp/UnBan.domain.txt
 
       # ==========================================
       # 5. Download latest Mihomo
       # ==========================================
-      - name: Download latest Mihomo
+      - name: Download Mihomo
         shell: bash
         run: |
           set -e
 
-          API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+          curl -fL \
+            "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64-compatible.gz" \
+            -o tmp/mihomo.gz
 
-          DOWNLOAD_URL="$(
-            curl -fsSL "$API_URL" |
-            jq -r '
-              .assets[]
-              | select(.name | test("^mihomo-linux-amd64-compatible-v.*\\.gz$"))
-              | .browser_download_url
-            ' |
-            head -n 1
-          )"
-
-          if [ -z "$DOWNLOAD_URL" ]; then
-            echo "ERROR: Cannot find latest Mihomo linux amd64 compatible release."
-            exit 1
-          fi
-
-          echo "Downloading:"
-          echo "$DOWNLOAD_URL"
-
-          curl -fL "$DOWNLOAD_URL" -o tmp/mihomo.gz
+          test -s tmp/mihomo.gz
 
           gunzip -f tmp/mihomo.gz
 
           chmod +x tmp/mihomo
 
+          echo "========== Mihomo version =========="
           ./tmp/mihomo -v
 
       # ==========================================
       # 6. Convert domain text to MRS
       # ==========================================
-      - name: Convert UnBan.domain.txt to UnBan.mrs
+      - name: Convert to MRS
         shell: bash
         run: |
           set -e
+
+          rm -f ruleset/UnBan.mrs
 
           ./tmp/mihomo convert-ruleset \
             domain \
@@ -134,28 +123,33 @@ jobs:
 
           test -s ruleset/UnBan.mrs
 
-          echo "Generated:"
+          echo "========== Generated MRS =========="
           ls -lh ruleset/UnBan.mrs
 
       # ==========================================
-      # 7. Show generated rule count
+      # 7. Verify MRS
       # ==========================================
-      - name: Verify generated rules
+      - name: Verify MRS
         shell: bash
         run: |
           set -e
 
-          echo "Source rules:"
-          grep -E '^[[:space:]]*DOMAIN(-SUFFIX)?,' tmp/UnBan.list | wc -l
+          if [ ! -f ruleset/UnBan.mrs ]; then
+            echo "ERROR: UnBan.mrs was not generated."
+            exit 1
+          fi
 
-          echo "Converted domain rules:"
-          wc -l < tmp/UnBan.domain.txt
+          FILE_SIZE=$(stat -c%s ruleset/UnBan.mrs)
 
-          echo "MRS file:"
-          ls -lh ruleset/UnBan.mrs
+          echo "UnBan.mrs size: ${FILE_SIZE} bytes"
+
+          if [ "$FILE_SIZE" -le 0 ]; then
+            echo "ERROR: UnBan.mrs is empty."
+            exit 1
+          fi
 
       # ==========================================
-      # 8. Remove temporary files
+      # 8. Cleanup
       # ==========================================
       - name: Cleanup
         shell: bash
@@ -163,7 +157,7 @@ jobs:
           rm -rf tmp
 
       # ==========================================
-      # 9. Check whether files changed
+      # 9. Check changes
       # ==========================================
       - name: Check changes
         id: changes
@@ -173,8 +167,10 @@ jobs:
 
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected."
           fi
 
       # ==========================================
@@ -197,4 +193,3 @@ jobs:
         shell: bash
         run: |
           git push
-```
