@@ -1,0 +1,178 @@
+```yaml
+name: Sync FakeIPFilter-!cn to MRS
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ==========================================
+      # 1. Checkout
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 2. Restore existing Mihomo
+      # ==========================================
+      - name: Restore Mihomo from Cache
+        id: mihomo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .mihomo
+          key: mihomo-linux-amd64-compatible-
+          restore-keys: |
+            mihomo-linux-amd64-compatible-
+
+      # ==========================================
+      # 3. Download Mihomo only if Cache is missing
+      # ==========================================
+      - name: Download latest Mihomo
+        if: steps.mihomo-cache.outputs.cache-matched-key == ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          mkdir -p .mihomo
+
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name')
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "ERROR: Failed to get Mihomo version."
+            exit 1
+          fi
+
+          echo "Latest Mihomo: $VERSION"
+
+          URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+
+          echo "Download URL: $URL"
+
+          curl -fL --retry 3 --retry-delay 2 \
+            "$URL" -o .mihomo/mihomo.gz
+
+          test -s .mihomo/mihomo.gz
+          gunzip -f .mihomo/mihomo.gz
+          chmod +x .mihomo/mihomo
+
+          .mihomo/mihomo -v
+
+      # ==========================================
+      # 4. Verify Mihomo
+      # ==========================================
+      - name: Verify Mihomo
+        shell: bash
+        run: |
+          set -e
+
+          test -x .mihomo/mihomo
+          .mihomo/mihomo -v
+
+      # ==========================================
+      # 5. Prepare directories
+      # ==========================================
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p tmp
+          mkdir -p ruleset
+
+      # ==========================================
+      # 6. Download fakeipfilter-!cn.list
+      # ==========================================
+      - name: Download fakeipfilter-!cn.list
+        shell: bash
+        run: |
+          set -e
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
+            "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list" \
+            -o tmp/fakeipfilter-!cn.list
+
+          test -s "tmp/fakeipfilter-!cn.list"
+
+          echo "Source downloaded."
+          ls -lh "tmp/fakeipfilter-!cn.list"
+
+          echo "First lines:"
+          head -30 "tmp/fakeipfilter-!cn.list"
+
+      # ==========================================
+      # 7. Convert to MRS
+      # ==========================================
+      - name: Convert fakeipfilter-!cn.list to MRS
+        shell: bash
+        run: |
+          set -e
+
+          rm -f "ruleset/fakeipfilter-!cn.mrs"
+
+          .mihomo/mihomo convert-ruleset \
+            domain \
+            yaml \
+            "tmp/fakeipfilter-!cn.list" \
+            "ruleset/fakeipfilter-!cn.mrs"
+
+          test -s "ruleset/fakeipfilter-!cn.mrs"
+
+          echo "MRS generated successfully."
+          ls -lh "ruleset/fakeipfilter-!cn.mrs"
+
+      # ==========================================
+      # 8. Validate
+      # ==========================================
+      - name: Validate MRS
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -s "ruleset/fakeipfilter-!cn.mrs" ]; then
+            echo "ERROR: MRS is empty or missing!"
+            exit 1
+          fi
+
+          echo "fakeipfilter-!cn.mrs validation passed."
+          ls -lh "ruleset/fakeipfilter-!cn.mrs"
+
+      # ==========================================
+      # 9. Commit and push
+      # ==========================================
+      - name: Commit changes
+        shell: bash
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "ruleset/fakeipfilter-!cn.mrs"
+
+          if git diff --cached --quiet; then
+            echo "MRS has not changed."
+            exit 0
+          fi
+
+          git commit \
+            -m "chore: update fakeipfilter-!cn.mrs"
+
+          git push
+```
