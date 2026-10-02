@@ -1,10 +1,7 @@
 # 只能DOMAIN-SUFFIX和DOMAIN，不能用keyboard
 
-# 小鹅通
-DOMAIN-SUFFIX,xiaoeknow.com
-DOMAIN-SUFFIX,xeknow.com
-DOMAIN-SUFFIX,im.qcloud.com
-DOMAIN-SUFFIX,qq.com
+# 天若
+DOMAIN-SUFFIX,baidubce.com
 
 # 华硕
 DOMAIN-SUFFIX,asusgo.com
@@ -12,6 +9,23 @@ DOMAIN,www.asus.com
 DOMAIN,www.asusgo.com
 DOMAIN-SUFFIX,asus.com.cn
 DOMAIN-SUFFIX,asuscomm.com
+
+
+DOMAIN,y.qq.com
+DOMAIN,image-line.com
+DOMAIN,win10.ipv6.microsoft.com
+DOMAIN,bdtj.tagtic.cn
+DOMAIN-SUFFIX,eastmoney.com
+DOMAIN-SUFFIX,zol.com.cn
+DOMAIN-SUFFIX,jb51.net
+DOMAIN,antping.com
+DOMAIN-SUFFIX,speedtest.cn
+
+# 小鹅通
+DOMAIN-SUFFIX,xiaoeknow.com
+DOMAIN-SUFFIX,xeknow.com
+DOMAIN-SUFFIX,im.qcloud.com
+DOMAIN-SUFFIX,qq.com
 
 # 游戏下载
 DOMAIN,dl.steam.clngaa.com
@@ -31,3 +45,6 @@ DOMAIN-SUFFIX,ctfile.com
 DOMAIN-SUFFIX,ctfile.net
 DOMAIN-SUFFIX,n802.com
 DOMAIN-SUFFIX,tv002.com
+
+# Hypixel Network
+DOMAIN,rewards.hypixel.net,DIRECT
