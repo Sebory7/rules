@@ -1,20 +1,21 @@
-name: Sync Custom Direct Rules to MRS
+name: Sync Loyalsoldier Rules to MRS
 
 on:
   schedule:
-    - cron: "55 3 * * *"
-
+    - cron: "30 0 * * *"
   workflow_dispatch:
-
 permissions:
   contents: write
+
+concurrency:
+  group: sync-custom-direct-mrs
+  cancel-in-progress: false
+  # Add concurrency lock
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-
     steps:
-
       # ==========================================
       # 1. Checkout
       # ==========================================
@@ -32,10 +33,8 @@ jobs:
           key: mihomo-linux-amd64-compatible-
           restore-keys: |
             mihomo-linux-amd64-compatible-
+      # =======Search for this prefix to find the latest Cache==========
 
-      # ======= Search for this prefix to find the latest Cache ==========
-
-      # ==========================================
       # 3. Download Mihomo only if Cache is missing
       # ==========================================
       - name: Download latest Mihomo
@@ -45,36 +44,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-
           mkdir -p .mihomo
-
           VERSION=$(curl -fsSL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
             | jq -r '.tag_name')
-
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
             echo "ERROR: Failed to get Mihomo version."
             exit 1
           fi
-
           echo "Latest Mihomo: $VERSION"
-
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
-
           echo "Download URL: $URL"
-
-          curl -fL --retry 3 --retry-delay 2 \
-            "$URL" \
-            -o .mihomo/mihomo.gz
-
+          curl -fL --retry 3 --retry-delay 2 "$URL" -o .mihomo/mihomo.gz
           test -s .mihomo/mihomo.gz
-
           gunzip -f .mihomo/mihomo.gz
-
           chmod +x .mihomo/mihomo
-
           .mihomo/mihomo -v
 
       # ==========================================
@@ -84,9 +70,7 @@ jobs:
         shell: bash
         run: |
           set -e
-
           test -x .mihomo/mihomo
-
           .mihomo/mihomo -v
 
       # ==========================================
@@ -96,102 +80,61 @@ jobs:
         shell: bash
         run: |
           set -e
-
           mkdir -p tmp
           mkdir -p ruleset
 
       # ==========================================
-      # 6. Download Custom-Direct.list
+      # 6. Download upstream rule
       # ==========================================
-      - name: Download Custom-Direct.list
+      - name: Download direct.txt
         shell: bash
         run: |
           set -e
-
           curl -fL \
             --retry 3 \
             --retry-delay 2 \
-            "https://raw.githubusercontent.com/Sebory7/rules/main/list/Custom-Direct.list" \
-            -o tmp/Custom-Direct.list
-
-          test -s tmp/Custom-Direct.list
-
-          echo "Custom-Direct.list downloaded."
-
+            "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/direct.txt" \
+            -o tmp/direct.txt
+          test -s tmp/direct.txt
+          echo "direct.txt downloaded."
           echo "File size:"
-          ls -lh tmp/Custom-Direct.list
-
+          ls -lh tmp/direct.txt
           echo "First lines:"
-          head -30 tmp/Custom-Direct.list
+          head -20 tmp/direct.txt
 
       # ==========================================
-      # 7. Convert Clash list -> Mihomo domain YAML
+      # 7. Convert TXT -> MRS
       # ==========================================
-      - name: Convert Custom-Direct.list to domain YAML
+      - name: Convert direct.txt to MRS
         shell: bash
         run: |
           set -e
-
-          awk -F',' '
-            BEGIN {
-              print "payload:"
-            }
-
-            /^DOMAIN,/ {
-              print "  - '\''" $2 "'\''"
-            }
-
-            /^DOMAIN-SUFFIX,/ {
-              print "  - '\''+" $2 "'\''"
-            }
-          ' tmp/Custom-Direct.list > tmp/Custom-Direct.yaml
-
-          test -s tmp/Custom-Direct.yaml
-
-          echo "Generated domain YAML:"
-          cat tmp/Custom-Direct.yaml
-
-      # ==========================================
-      # 8. Convert domain YAML -> MRS
-      # ==========================================
-      - name: Convert Custom-Direct.yaml to MRS
-        shell: bash
-        run: |
-          set -e
-
-          rm -f ruleset/Custom-Direct.mrs
-
+          rm -f ruleset/direct.mrs
           .mihomo/mihomo convert-ruleset \
             domain \
             yaml \
-            tmp/Custom-Direct.yaml \
-            ruleset/Custom-Direct.mrs
-
-          test -s ruleset/Custom-Direct.mrs
-
+            tmp/direct.txt \
+            ruleset/direct.mrs
+          test -s ruleset/direct.mrs
           echo "MRS generated successfully."
-
-          ls -lh ruleset/Custom-Direct.mrs
+          ls -lh ruleset/direct.mrs
 
       # ==========================================
-      # 9. Validate
+      # 8. Validate
       # ==========================================
       - name: Validate MRS
         shell: bash
         run: |
           set -e
-
-          if [ ! -s ruleset/Custom-Direct.mrs ]; then
-            echo "ERROR: ruleset/Custom-Direct.mrs is empty or missing!"
+          if [ ! -s ruleset/direct.mrs ]; then
+            echo "ERROR: ruleset/direct.mrs is empty or missing!"
             exit 1
           fi
-
-          echo "Custom-Direct.mrs validation passed."
-
-          ls -lh ruleset/Custom-Direct.mrs
+          echo "direct.mrs validation passed."
+          ls -lh ruleset/direct.mrs
 
       # ==========================================
-      # 10. Commit and push
+      # 9. Commit and push
       # ==========================================
       - name: Commit changes
         shell: bash
@@ -200,15 +143,30 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add ruleset/Custom-Direct.mrs
 
           if git diff --cached --quiet; then
             echo "ruleset/Custom-Direct.mrs has not changed."
             exit 0
           fi
-
           git commit \
             -m "chore: update Custom-Direct.mrs"
 
-          git push
+      # ==========================================
+      # 10. Sync remote main
+      # ==============Prevent Git branch history conflicts=============
+      - name: Sync with remote
+        shell: bash
+        run: |
+          set -e
+          git fetch origin main
+          git rebase origin/main
+
+      # ==========================================
+      # 12. Push
+      # ==========================================
+      - name: Push changes
+        shell: bash
+        run: |
+          set -e
+          git push origin HEAD:main
