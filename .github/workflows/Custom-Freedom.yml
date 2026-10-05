@@ -1,4 +1,3 @@
-```yaml
 name: Sync Custom-Freedom to MRS
 on:
   schedule:
