@@ -113,23 +113,86 @@ jobs:
           head -20 tmp/CustomAD-ipcidr.list
 
       # ==========================================
-      # 7. Convert CustomAD-ipcidr.list -> MRS
+      # 7. Prepare IP-CIDR rules
       # ==========================================
-      - name: Convert CustomAD-ipcidr.list to MRS
+      - name: Prepare IP-CIDR rules
         shell: bash
         run: |
           set -e
+          rm -f tmp/CustomAD-ipcidr.txt
           rm -f ruleset/CustomAD-ipcidr.mrs
+
+          awk '
+            {
+              # Remove CR from Windows-style line endings
+              sub(/\r$/, "", $0)
+              # Trim leading/trailing whitespace
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+            }
+
+            # -----------Ignore comments------------
+            /^[[:space:]]*#/ {
+              next
+            }
+
+            # -------------Ignore empty lines---------
+            /^[[:space:]]*$/ {
+              next
+            }
+
+            # ----------Accept IPv4 CIDR---------------
+            /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ {
+              print
+              next
+            }
+
+            # -----------Accept IPv6 CIDR---------
+            /^[0-9A-Fa-f:]+\/[0-9]+$/ {
+              print
+              next
+            }
+
+            # -------------Unsupported rule--------
+            # Stop the workflow to prevent
+            # accidental incorrect conversion.
+            # --------------------------------------
+            {
+              print "ERROR: Unsupported IP-CIDR rule:"
+              print $0
+              exit 1
+            }
+          ' tmp/CustomAD-ipcidr.list > tmp/CustomAD-ipcidr.txt
+
+          test -s tmp/CustomAD-ipcidr.txt
+          echo ""
+          echo "=========================================="
+          echo "Converted IP-CIDR text"
+          echo "=========================================="
+          cat tmp/CustomAD-ipcidr.txt
+          echo ""
+          echo "=========================================="
+          echo "Rule count"
+          echo "=========================================="
+          wc -l tmp/CustomAD-ipcidr.txt
+
+      # ==========================================
+      # 8. Convert IP-CIDR text -> MRS
+      # ==========================================
+      - name: Convert IP-CIDR text to MRS
+        shell: bash
+        run: |
+          set -e
           .mihomo/mihomo convert-ruleset \
             ipcidr \
             text \
-            tmp/CustomAD-ipcidr.list \
+            tmp/CustomAD-ipcidr.txt \
             ruleset/CustomAD-ipcidr.mrs
           test -s ruleset/CustomAD-ipcidr.mrs
           echo "MRS generated successfully."
           ls -lh ruleset/CustomAD-ipcidr.mrs
+
       # ==========================================
-      # 8. Validate
+      # 9. Validate
       # ==========================================
       - name: Validate MRS
         shell: bash
@@ -144,7 +207,7 @@ jobs:
           ls -lh ruleset/CustomAD-ipcidr.mrs
 
       # ==========================================
-      # 9. Commit changes
+      # 10. Commit changes
       # ==========================================
       - name: Commit changes
         shell: bash
@@ -162,7 +225,7 @@ jobs:
             -m "chore: update CustomAD-ipcidr.mrs"
 
       # ==========================================
-      # 10. Sync remote main
+      # 11. Sync remote main
       # ============Preventing Git Branch History Conflicts==============
       # ==========================================
       - name: Sync with remote
@@ -173,7 +236,7 @@ jobs:
           git rebase origin/main
 
       # ==========================================
-      # 11. Push
+      # 12. Push
       # ==========================================
       - name: Push changes
         shell: bash
