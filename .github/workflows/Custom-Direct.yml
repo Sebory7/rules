@@ -1,4 +1,4 @@
-name: Sync Loyalsoldier Rules to MRS
+name: Sync Custom Direct Rules to MRS
 
 on:
   schedule:
