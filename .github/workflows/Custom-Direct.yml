@@ -113,7 +113,15 @@ jobs:
       # ==========================================
       # 7. Convert Custom-list -> MRS
       # ==============Convert Domain Name to a Wildcard==========
-
+      #
+      # DOMAIN-SUFFIX -> +.example.com
+      # DOMAIN        -> example.com
+      # DOMAIN-KEYWORD -> DELETE
+      #
+      # Comments and empty lines -> DELETE
+      # Other unsupported rules -> ERROR
+      #
+      # ==========================================
       - name: Prepare domain rules
         shell: bash
         run: |
@@ -122,16 +130,64 @@ jobs:
           rm -f ruleset/Custom-Direct.mrs
 
           awk -F',' '
-            /^[[:space:]]*#/ { next }
-            /^[[:space:]]*$/ { next }
+            # --------------------------------------
+            # Ignore comments
+            # --------------------------------------
+            /^[[:space:]]*#/ {
+              next
+            }
+            # --------------------------------------
+            # Ignore empty lines
+            # --------------------------------------
+            /^[[:space:]]*$/ {
+              next
+            }
+            # --------------------------------------
+            # DOMAIN-SUFFIX
+            # DOMAIN-SUFFIX,example.com
+            # ->
+            # +.example.com
+            # --------------------------------------
             $1 == "DOMAIN-SUFFIX" {
+              if ($2 == "") {
+                print "WARNING: Empty DOMAIN-SUFFIX rule skipped:"
+                print $0
+                next
+              }
               print "+." $2
               next
             }
+            # --------------------------------------
+            # DOMAIN
+            # DOMAIN,example.com
+            # ->
+            # example.com
+            # --------------------------------------
             $1 == "DOMAIN" {
+              if ($2 == "") {
+                print "WARNING: Empty DOMAIN rule skipped:"
+                print $0
+                next
+              }
               print $2
               next
             }
+            # --------------------------------------
+            # DOMAIN-KEYWORD
+            # Delete directly
+            #
+            # Do NOT convert to wildcard.
+            # --------------------------------------
+            $1 == "DOMAIN-KEYWORD" {
+              print "INFO: Removing DOMAIN-KEYWORD rule:"
+              print $0
+              next
+            }
+            # --------------------------------------
+            # Any other rule type
+            # Stop the workflow to prevent
+            # accidental incorrect conversion.
+            # --------------------------------------
             {
               print "ERROR: Unsupported rule:"
               print $0
