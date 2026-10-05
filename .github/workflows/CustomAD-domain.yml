@@ -2,19 +2,23 @@ name: Sync CustomAD Rules to MRS
 
 on:
   schedule:
-    - cron: "40 3 * * *"
-
+    - cron: "32 3 * * *"
+    # run at 3:32
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: sync-custom-ad-domain-mrs
+  cancel-in-progress: false
+  # Prevent multiple runs from pushing to main at the same time
 
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
-
       # ==========================================
       # 1. Checkout
       # ==========================================
@@ -33,8 +37,6 @@ jobs:
           restore-keys: |
             mihomo-linux-amd64-compatible-
 
-      # ======= Search for this prefix to find the latest Cache ==========
-
       # ==========================================
       # 3. Download Mihomo only if Cache is missing
       # ==========================================
@@ -47,34 +49,24 @@ jobs:
           set -e
 
           mkdir -p .mihomo
-
           VERSION=$(curl -fsSL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
             | jq -r '.tag_name')
-
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
             echo "ERROR: Failed to get Mihomo version."
             exit 1
           fi
-
           echo "Latest Mihomo: $VERSION"
-
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
-
           echo "Download URL: $URL"
-
           curl -fL --retry 3 --retry-delay 2 \
             "$URL" \
             -o .mihomo/mihomo.gz
-
           test -s .mihomo/mihomo.gz
-
           gunzip -f .mihomo/mihomo.gz
-
           chmod +x .mihomo/mihomo
-
           .mihomo/mihomo -v
 
       # ==========================================
@@ -84,9 +76,7 @@ jobs:
         shell: bash
         run: |
           set -e
-
           test -x .mihomo/mihomo
-
           .mihomo/mihomo -v
 
       # ==========================================
@@ -96,7 +86,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
           mkdir -p tmp
           mkdir -p ruleset
 
@@ -107,7 +96,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
           curl -fL \
             --retry 3 \
             --retry-delay 2 \
@@ -115,39 +103,156 @@ jobs:
             -o tmp/CustomAD-domain.list
 
           test -s tmp/CustomAD-domain.list
-
           echo "CustomAD-domain.list downloaded."
-
           echo "File size:"
           ls -lh tmp/CustomAD-domain.list
-
           echo "First lines:"
           head -20 tmp/CustomAD-domain.list
 
       # ==========================================
-      # 7. Convert CustomAD-domain.list -> MRS
+      # 7. Prepare domain rules
+      # ==============Convert Domain Name to a Wildcard==========
+      #
+      # +.example.com -> +.example.com
+      # example.com -> example.com
+      #
+      # Comments and empty lines -> DELETE from MRS input
+      #
+      # Original comments remain preserved
+      # in the downloaded .list file.
+      #
+      # Other unsupported rules -> ERROR
+      #
       # ==========================================
-      - name: Convert CustomAD-domain.list to MRS
+      - name: Prepare domain rules
+        shell: bash
+        run: |
+          set -e
+          rm -f tmp/CustomAD-domain.txt
+          rm -f ruleset/CustomAD-domain.mrs
+
+          awk -F',' '
+            {
+              # Remove CR from Windows-style line endings
+              sub(/\r$/, "", $0)
+              # Trim leading/trailing whitespace
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+            }
+            # --------------------------------------
+            # Ignore comments
+            # --------------------------------------
+            /^[[:space:]]*#/ {
+              next
+            }
+            # --------------------------------------
+            # Ignore empty lines
+            # --------------------------------------
+            /^[[:space:]]*$/ {
+              next
+            }
+            # ----------------DOMAIN-SUFFIX--------
+            # 
+            #
+            # DOMAIN-SUFFIX,example.com -> +.example.com
+            # DOMAIN-SUFFIX,example.com,Proxy -> +.example.com
+            # --------------------------------------
+            $1 == "DOMAIN-SUFFIX" {
+              domain = $2
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", domain)
+              if (domain == "") {
+                print "WARNING: Empty DOMAIN-SUFFIX rule skipped:" > "/dev/stderr"
+                print $0 > "/dev/stderr"
+                next
+              }
+              print "+." domain
+              next
+            }
+
+            # --------------DOMAIN----------------
+            # DOMAIN,example.com -> example.com
+            # DOMAIN,example.com,DIRECT -> example.com
+            # --------------------------------------
+            $1 == "DOMAIN" {
+              domain = $2
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", domain)
+              if (domain == "") {
+                print "WARNING: Empty DOMAIN rule skipped:" > "/dev/stderr"
+                print $0 > "/dev/stderr"
+                next
+              }
+              print domain
+              next
+            }
+
+            # -------------DOMAIN-KEYWORD------------
+            # DOMAIN-KEYWORD,example -> Delete directly
+            # Do NOT convert to wildcard.
+            # --------------------------------------
+            $1 == "DOMAIN-KEYWORD" {
+              print "INFO: Removing DOMAIN-KEYWORD rule:" > "/dev/stderr"
+              print $0 > "/dev/stderr"
+              next
+            }
+
+            # -----------Wildcard suffix domain-------------
+            # +.example.com -> +.example.com
+            # --------------------------------------
+            /^\+\./ {
+              print
+              next
+            }
+
+            # -----------Plain domain--------------
+            # example.com -> example.com
+            # Also accepts subdomains: www.example.com
+            # --------------------------------------
+            /^[A-Za-z0-9]/ {
+              print
+              next
+            }
+
+            # -----------Any other rule type----------------
+            # Stop the workflow to prevent
+            # accidental incorrect conversion.
+            # --------------------------------------
+            {
+              print "ERROR: Unsupported rule:"
+              print $0
+              exit 1
+            }
+
+          ' tmp/CustomAD-domain.list > tmp/CustomAD-domain.txt
+          test -s tmp/CustomAD-domain.txt
+          echo ""
+          echo "=========================================="
+          echo "Converted domain text"
+          echo "=========================================="
+          cat tmp/CustomAD-domain.txt
+          echo ""
+          echo "=========================================="
+          echo "Rule count"
+          echo "=========================================="
+          wc -l tmp/CustomAD-domain.txt
+
+      # ==========================================
+      # 8. Convert domain text -> MRS
+      # ==========================================
+      - name: Convert domain text to MRS
         shell: bash
         run: |
           set -e
 
-          rm -f ruleset/CustomAD-domain.mrs
-
           .mihomo/mihomo convert-ruleset \
             domain \
             text \
-            tmp/CustomAD-domain.list \
+            tmp/CustomAD-domain.txt \
             ruleset/CustomAD-domain.mrs
-
           test -s ruleset/CustomAD-domain.mrs
-
           echo "MRS generated successfully."
-
           ls -lh ruleset/CustomAD-domain.mrs
 
       # ==========================================
-      # 8. Validate
+      # 9. Validate
       # ==========================================
       - name: Validate MRS
         shell: bash
@@ -158,13 +263,11 @@ jobs:
             echo "ERROR: ruleset/CustomAD-domain.mrs is empty or missing!"
             exit 1
           fi
-
           echo "CustomAD-domain.mrs validation passed."
-
           ls -lh ruleset/CustomAD-domain.mrs
 
       # ==========================================
-      # 9. Commit and push
+      # 10. Commit changes
       # ==========================================
       - name: Commit changes
         shell: bash
@@ -173,15 +276,30 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add ruleset/CustomAD-domain.mrs
-
           if git diff --cached --quiet; then
             echo "ruleset/CustomAD-domain.mrs has not changed."
             exit 0
           fi
-
           git commit \
             -m "chore: update CustomAD-domain.mrs"
 
-          git push
+      # ==========================================
+      # 11. Sync remote main
+      # ============Preventing Git Branch History Conflicts==============
+      # ==========================================
+      - name: Sync with remote
+        shell: bash
+        run: |
+          set -e
+          git fetch origin main
+          git rebase origin/main
+
+      # ==========================================
+      # 12. Push
+      # ==========================================
+      - name: Push changes
+        shell: bash
+        run: |
+          set -e
+          git push origin HEAD:main
