@@ -114,12 +114,17 @@ jobs:
       # 7. Convert Custom-list -> MRS
       # ==============Convert Domain Name to a Wildcard==========
       #
-      # DOMAIN-SUFFIX -> +.example.com
-      # DOMAIN        -> example.com
-      # DOMAIN-KEYWORD -> DELETE
+      # DOMAIN-SUFFIX,example.com -> +.example.com
+      # DOMAIN,example.com -> example.com
+      # DOMAIN-KEYWORD,example -> DELETE
+      # +.example.com -> +.example.com
+      # example.com ->  example.com
+      # Comments and empty lines ->  DELETE from MRS input
       #
-      # Comments and empty lines -> DELETE
-      # Other unsupported rules -> ERROR
+      # Original comments remain preserved
+      # in the downloaded .list file.
+      #
+      # Other unsupported rules ->  ERROR
       #
       # ==========================================
       - name: Prepare domain rules
@@ -130,6 +135,12 @@ jobs:
           rm -f ruleset/Custom-Direct.mrs
 
           awk -F',' '
+            {
+              # Remove CR from Windows-style line endings
+              sub(/\r$/, "", $0)
+              # Trim leading/trailing whitespace
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+            }
             # --------------------------------------
             # Ignore comments
             # --------------------------------------
@@ -142,49 +153,68 @@ jobs:
             /^[[:space:]]*$/ {
               next
             }
-            # --------------------------------------
-            # DOMAIN-SUFFIX
-            # DOMAIN-SUFFIX,example.com
-            # ->
-            # +.example.com
+            # ----------------DOMAIN-SUFFIX--------
+            # 
+            #
+            # DOMAIN-SUFFIX,example.com -> +.example.com
+            # DOMAIN-SUFFIX,example.com,Proxy -> +.example.com
             # --------------------------------------
             $1 == "DOMAIN-SUFFIX" {
-              if ($2 == "") {
-                print "WARNING: Empty DOMAIN-SUFFIX rule skipped:"
-                print $0
+              domain = $2
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", domain)
+              if (domain == "") {
+                print "WARNING: Empty DOMAIN-SUFFIX rule skipped:" > "/dev/stderr"
+                print $0 > "/dev/stderr"
                 next
               }
-              print "+." $2
+              print "+." domain
               next
             }
-            # --------------------------------------
-            # DOMAIN
-            # DOMAIN,example.com
-            # ->
-            # example.com
+
+            # --------------DOMAIN----------------
+            # DOMAIN,example.com -> example.com
+            # DOMAIN,example.com,DIRECT -> example.com
             # --------------------------------------
             $1 == "DOMAIN" {
-              if ($2 == "") {
-                print "WARNING: Empty DOMAIN rule skipped:"
-                print $0
+              domain = $2
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", domain)
+              if (domain == "") {
+                print "WARNING: Empty DOMAIN rule skipped:" > "/dev/stderr"
+                print $0 > "/dev/stderr"
                 next
               }
-              print $2
+              print domain
               next
             }
-            # --------------------------------------
-            # DOMAIN-KEYWORD
-            # Delete directly
-            #
+
+            # -------------DOMAIN-KEYWORD------------
+            # DOMAIN-KEYWORD,example -> Delete directly
             # Do NOT convert to wildcard.
             # --------------------------------------
             $1 == "DOMAIN-KEYWORD" {
-              print "INFO: Removing DOMAIN-KEYWORD rule:"
-              print $0
+              print "INFO: Removing DOMAIN-KEYWORD rule:" > "/dev/stderr"
+              print $0 > "/dev/stderr"
               next
             }
+
+            # -----------Wildcard suffix domain-------------
+            # +.example.com -> +.example.com
             # --------------------------------------
-            # Any other rule type
+            /^\+\./ {
+              print
+              next
+            }
+
+            # -----------Plain domain--------------
+            # example.com -> example.com
+            # Also accepts subdomains: www.example.com
+            # --------------------------------------
+            /^[A-Za-z0-9]/ {
+              print
+              next
+            }
+
+            # -----------Any other rule type----------------
             # Stop the workflow to prevent
             # accidental incorrect conversion.
             # --------------------------------------
@@ -193,12 +223,18 @@ jobs:
               print $0
               exit 1
             }
-            
+
           ' tmp/Custom-Direct.list > tmp/Custom-Direct.txt
           test -s tmp/Custom-Direct.txt
-          echo "Converted domain text:"
+          echo ""
+          echo "=========================================="
+          echo "Converted domain text"
+          echo "=========================================="
           cat tmp/Custom-Direct.txt
-          echo "Rule count:"
+          echo ""
+          echo "=========================================="
+          echo "Rule count"
+          echo "=========================================="
           wc -l tmp/Custom-Direct.txt
 
       # ==========================================
