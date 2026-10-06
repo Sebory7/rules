@@ -160,6 +160,7 @@ jobs:
               print
               next
             }
+
             # -------------Wildcard domain---------
             # *.example.com -> *.example.com
             # *.square-enix.com -> *.square-enix.com
@@ -168,6 +169,7 @@ jobs:
               print
               next
             }
+
             # -----Plain domain / wildcard domain---
             # example.com -> example.com
             # time.*.com -> time.*.com
@@ -177,6 +179,7 @@ jobs:
               print
               next
             }
+
             # -------Any other rule type--------
             # Stop the workflow to prevent
             # accidental incorrect conversion.
