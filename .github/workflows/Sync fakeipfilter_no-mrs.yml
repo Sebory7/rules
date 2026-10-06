@@ -2,25 +2,28 @@ name: Sync fakeipfilter no cn to MRS
 
 on:
   schedule:
-    - cron: "30 3 * * *"
-
+    - cron: "41 3 * * *"
+    # run at 3:41
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: sync-fakeipfilter-no-cn-mrs
+  cancel-in-progress: false
+  # Prevent multiple runs from pushing to main at the same time
 
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
-
       # ==========================================
       # 1. Checkout
       # ==========================================
       - name: Checkout repository
         uses: actions/checkout@v4
-
 
       # ==========================================
       # 2. Restore existing Mihomo
@@ -34,9 +37,7 @@ jobs:
           restore-keys: |
             mihomo-linux-amd64-compatible-
 
-      # =======Search for this prefix to find the latest Cache==========
-
-
+      # ======= Search for this prefix to find the latest Cache ==========
       # ==========================================
       # 3. Download Mihomo only if Cache is missing
       # ==========================================
@@ -49,31 +50,25 @@ jobs:
           set -e
 
           mkdir -p .mihomo
-
           VERSION=$(curl -fsSL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
             | jq -r '.tag_name')
-
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
             echo "ERROR: Failed to get Mihomo version."
             exit 1
           fi
-
           echo "Latest Mihomo: $VERSION"
-
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
           echo "Download URL: $URL"
-
-          curl -fL --retry 3 --retry-delay 2 "$URL" -o .mihomo/mihomo.gz
-
+          curl -fL --retry 3 --retry-delay 2 \
+            "$URL" \
+            -o .mihomo/mihomo.gz
           test -s .mihomo/mihomo.gz
           gunzip -f .mihomo/mihomo.gz
           chmod +x .mihomo/mihomo
-
           .mihomo/mihomo -v
-
 
       # ==========================================
       # 4. Verify Mihomo
@@ -82,11 +77,8 @@ jobs:
         shell: bash
         run: |
           set -e
-
           test -x .mihomo/mihomo
-
           .mihomo/mihomo -v
-
 
       # ==========================================
       # 5. Prepare directories
@@ -95,10 +87,8 @@ jobs:
         shell: bash
         run: |
           set -e
-
           mkdir -p tmp
           mkdir -p ruleset
-
 
       # ==========================================
       # 6. Download fakeipfilter-!cn.list
@@ -107,49 +97,128 @@ jobs:
         shell: bash
         run: |
           set -e
-
           curl -fL \
             --retry 3 \
             --retry-delay 2 \
             "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list" \
-            -o tmp/fakeipfilter-no-cn.list
+            -o 'tmp/fakeipfilter-no-cn.list'
 
-          test -s tmp/fakeipfilter-no-cn.list
-
+          test -s 'tmp/fakeipfilter-no-cn.list'
           echo "fakeipfilter-!cn.list downloaded."
-
           echo "File size:"
-          ls -lh tmp/fakeipfilter-no-cn.list
-
+          ls -lh 'tmp/fakeipfilter-no-cn.list'
           echo "First lines:"
-          head -30 tmp/fakeipfilter-no-cn.list
-
+          head -30 'tmp/fakeipfilter-no-cn.list'
 
       # ==========================================
-      # 7. Convert LIST -> MRS
+      # 7. Prepare domain rules
+      # ==============Convert Domain Name to a Wildcard==========
+      # This source is already a domain-format list.
+      #
+      # +.example.com -> +.example.com
+      # *.example.com -> *.example.com
+      # example.com -> example.com
+      # example.*.com -> example.*.com
+      #
+      # Comments and empty lines -> DELETE from MRS input
+      # Original comments remain preserved
+      # in the downloaded .list file.
+      #
+      # Other unsupported rules -> ERROR
+      #
       # ==========================================
-      - name: Convert fakeipfilter no CN list to MRS
+      - name: Prepare domain rules
+        shell: bash
+        run: |
+          set -e
+          rm -f 'tmp/fakeipfilter-no-cn.txt'
+          rm -f 'ruleset/fakeipfilter-!cn.mrs'
+          awk '
+
+            {
+              # Remove CR from Windows-style line endings
+              sub(/\r$/, "", $0)
+              # Trim leading/trailing whitespace
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+            }
+
+            # ------------Ignore comments-------------
+            /^[[:space:]]*#/ {
+              next
+            }
+
+            # ------------Ignore empty lines---------
+            /^[[:space:]]*$/ {
+              next
+            }
+
+            # ---------Wildcard suffix domain-------
+            # +.example.com -> +.example.com
+            # +.stun.*.* -> +.stun.*.*
+            # --------------------------------------
+            /^\+\./ {
+              print
+              next
+            }
+            # -------------Wildcard domain---------
+            # *.example.com -> *.example.com
+            # *.square-enix.com -> *.square-enix.com
+            # --------------------------------------
+            /^\*\./ {
+              print
+              next
+            }
+            # -----Plain domain / wildcard domain---
+            # example.com -> example.com
+            # time.*.com -> time.*.com
+            # xbox.*.*.microsoft.com
+            # --------------------------------------
+            /^[A-Za-z0-9]/ {
+              print
+              next
+            }
+            # -------Any other rule type--------
+            # Stop the workflow to prevent
+            # accidental incorrect conversion.
+            # --------------------------------------
+            {
+              print "ERROR: Unsupported rule:"
+              print $0
+              exit 1
+            }
+
+          ' 'tmp/fakeipfilter-no-cn.list' > 'tmp/fakeipfilter-no-cn.txt'
+          test -s 'tmp/fakeipfilter-no-cn.txt'
+          echo ""
+          echo "=========================================="
+          echo "Converted domain text"
+          echo "=========================================="
+          cat 'tmp/fakeipfilter-no-cn.txt'
+          echo ""
+          echo "=========================================="
+          echo "Rule count"
+          echo "=========================================="
+          wc -l 'tmp/fakeipfilter-no-cn.txt'
+
+      # ==========================================
+      # 8. Convert domain text -> MRS
+      # ==========================================
+      - name: Convert domain text to MRS
         shell: bash
         run: |
           set -e
 
-          rm -f 'ruleset/fakeipfilter-!cn.mrs'
-
           .mihomo/mihomo convert-ruleset \
             domain \
             text \
-            tmp/fakeipfilter-no-cn.list \
+            'tmp/fakeipfilter-no-cn.txt' \
             'ruleset/fakeipfilter-!cn.mrs'
-
           test -s 'ruleset/fakeipfilter-!cn.mrs'
-
           echo "fakeipfilter-!cn.mrs generated successfully."
-
           ls -lh 'ruleset/fakeipfilter-!cn.mrs'
 
-
       # ==========================================
-      # 8. Validate
+      # 9. Validate
       # ==========================================
       - name: Validate MRS
         shell: bash
@@ -160,14 +229,11 @@ jobs:
             echo "ERROR: ruleset/fakeipfilter-!cn.mrs is empty or missing!"
             exit 1
           fi
-
           echo "fakeipfilter-!cn.mrs validation passed."
-
           ls -lh 'ruleset/fakeipfilter-!cn.mrs'
 
-
       # ==========================================
-      # 9. Commit and push
+      # 10. Commit changes
       # ==========================================
       - name: Commit changes
         shell: bash
@@ -176,15 +242,29 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add 'ruleset/fakeipfilter-!cn.mrs'
-
           if git diff --cached --quiet; then
             echo "ruleset/fakeipfilter-!cn.mrs has not changed."
             exit 0
           fi
-
           git commit \
             -m "chore: update fakeipfilter-!cn.mrs"
 
-          git push
+      # ==========================================
+      # 11. Sync remote main
+      # ======Preventing Git Branch History Conflicts=======
+      - name: Sync with remote
+        shell: bash
+        run: |
+          set -e
+          git fetch origin main
+          git rebase origin/main
+
+      # ==========================================
+      # 12. Push
+      # ==========================================
+      - name: Push changes
+        shell: bash
+        run: |
+          set -e
+          git push origin HEAD:main
