@@ -105,15 +105,45 @@ jobs:
             -o tmp/CloudGlobal_IP.yaml
 
           test -s tmp/CloudGlobal_IP.yaml
+
           echo "CloudGlobal_IP.yaml downloaded."
           echo "File size:"
           ls -lh tmp/CloudGlobal_IP.yaml
-          echo "First lines:"
+          echo ""
+          echo "=========================================="
+          echo "First lines"
+          echo "=========================================="
           head -30 tmp/CloudGlobal_IP.yaml
+          echo ""
+          echo "=========================================="
+          echo "YAML structure check"
+          echo "=========================================="
+
+          if ! grep -qE '^[[:space:]]*payload:' tmp/CloudGlobal_IP.yaml; then
+            echo "ERROR: CloudGlobal_IP.yaml does not contain a payload section!"
+            exit 1
+          fi
+          echo "payload section detected."
+          echo ""
+          echo "=========================================="
+          echo "Payload rule count"
+          echo "=========================================="
+
+          RULE_COUNT=$(grep -cE '^[[:space:]]*-[[:space:]]' tmp/CloudGlobal_IP.yaml || true)
+          echo "Detected rules: ${RULE_COUNT}"
+          if [ "$RULE_COUNT" -eq 0 ]; then
+            echo "ERROR: No rules detected in CloudGlobal_IP.yaml!"
+            exit 1
+          fi
 
       # ==========================================
- #Yaml transformation reads YAML directly, no need to use awk to remove comments
       # 7. Convert YAML -> MRS
+      #
+      # YAML transformation reads YAML directly,
+      # so there is NO need to use awk to remove
+      # comments or manually extract IP-CIDR rules.
+      # Mi handles the YAML structure directly.
+      #
       # ==========================================
       - name: Convert CloudGlobal_IP.yaml to MRS
         shell: bash
@@ -126,7 +156,18 @@ jobs:
             yaml \
             tmp/CloudGlobal_IP.yaml \
             ruleset/CloudGlobal_IP.mrs
+          
           test -s ruleset/CloudGlobal_IP.mrs
+          MRS_SIZE=$(stat -c%s ruleset/CloudGlobal_IP.mrs)
+          echo ""
+          echo "=========================================="
+          echo "MRS validation"
+          echo "=========================================="
+          echo "MRS size: ${MRS_SIZE} bytes"
+          if [ "$MRS_SIZE" -lt 100 ]; then
+            echo "ERROR: Generated MRS is suspiciously small!"
+            exit 1
+          fi
           echo "CloudGlobal_IP.mrs generated successfully."
           ls -lh ruleset/CloudGlobal_IP.mrs
 
@@ -137,12 +178,12 @@ jobs:
         shell: bash
         run: |
           set -e
-
           if [ ! -s ruleset/CloudGlobal_IP.mrs ]; then
             echo "ERROR: ruleset/CloudGlobal_IP.mrs is empty or missing!"
             exit 1
           fi
           echo "CloudGlobal_IP.mrs validation passed."
+          echo "Final MRS:"
           ls -lh ruleset/CloudGlobal_IP.mrs
 
       # ==========================================
@@ -152,20 +193,25 @@ jobs:
         shell: bash
         run: |
           set -e
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ruleset/CloudGlobal_IP.mrs
+
           if git diff --cached --quiet; then
             echo "ruleset/CloudGlobal_IP.mrs has not changed."
             exit 0
           fi
+          echo ""
+          echo "=========================================="
+          echo "Pending changes"
+          echo "=========================================="
+          git diff --cached --stat
           git commit \
             -m "chore: update CloudGlobal_IP.mrs"
 
       # ==========================================
       # 10. Sync remote main
-      # ============Preventing Git Branch History Conflicts==============
+      # ======Preventing Git Branch History Conflicts=========
       - name: Sync with remote
         shell: bash
         run: |
