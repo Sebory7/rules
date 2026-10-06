@@ -114,6 +114,29 @@ jobs:
 
       # ==========================================
       # 7. Prepare IP-CIDR rules
+      # ========Convert to Standard CIDR==========
+      # Supported input formats:
+      # 1. Plain CIDR:  72.145.135.0/24
+      #
+      # 2. IP-CIDR:
+      # IP-CIDR,1.183.100.0/24
+      # IP-CIDR,1.183.100.0/24,direct
+      # IP-CIDR,1.183.100.0/24,direct,no-resolve
+      #
+      # 3.YAML list prefix:
+      # - IP-CIDR,1.183.100.0/24,direct,no-resolve
+      #
+      # 4. Inline comments:
+      # 1.183.100.0/24 # comment
+      # IP-CIDR,1.183.100.0/24,direct,no-resolve # comment
+      #
+      # Comments and empty lines -> DELETE
+      # Rule policy / direct / no-resolve -> DELETE
+      #
+      # Final output contains ONLY standard CIDR: 1.183.100.0/24
+      # IPv4 and IPv6 are both supported.
+      # Other unsupported rules -> ERROR
+      #
       # ==========================================
       - name: Prepare IP-CIDR rules
         shell: bash
@@ -130,43 +153,97 @@ jobs:
               gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
             }
 
-            # -----------Ignore comments------------
+            # -----------Ignore full-line comments------
             /^[[:space:]]*#/ {
               next
             }
 
-            # -------------Ignore empty lines---------
+            # -------Ignore empty lines--------
             /^[[:space:]]*$/ {
               next
             }
 
-            # ----------Accept IPv4 CIDR---------------
+            # -----------Remove YAML list prefix--------
+            # - IP-CIDR,...
+            # -> IP-CIDR,...
+            # --------------------------------------
+            /^-[[:space:]]*IP-CIDR,/ {
+              sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
+            }
+
+            # -----------Remove inline comments-----
+            # Example:
+            # IP-CIDR,1.183.100.0/24,direct # comment 
+                # -> IP-CIDR,1.183.100.0/24,direct
+            # Plain CIDR: 1.183.100.0/24 # comment -> 1.183.100.0/24
+            # --------------------------------------
+            sub(/[[:space:]]+#.*$/, "", $0)
+            # Trim again after removing comments
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+
+            # ----------IP-CIDR rule----------------
+            # IP-CIDR,1.183.100.0/24
+            # IP-CIDR,1.183.100.0/24,direct
+            # IP-CIDR,1.183.100.0/24,direct,no-resolve
+            # Only extract the CIDR itself.
+            # --------------------------------------
+            /^IP-CIDR[[:space:]]*,/ {
+              split($0, fields, ",")
+              cidr = fields[2]
+
+              # Trim CIDR whitespace
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", cidr)
+              if (cidr == "") {
+                print "ERROR: Empty IP-CIDR address:" > "/dev/stderr"
+                print $0 > "/dev/stderr"
+                exit 1
+              }
+              # Validate IPv4 CIDR
+              if (cidr ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/) {
+                print cidr
+                next
+              }
+              # Validate IPv6 CIDR
+              if (cidr ~ /^[0-9A-Fa-f:]+\/[0-9]+$/) {
+                print cidr
+                next
+              }
+              print "ERROR: Invalid IP-CIDR address:" > "/dev/stderr"
+              print cidr > "/dev/stderr"
+              exit 1
+            }
+
+            # ------Plain IPv4 CIDR------------
+            # 1.183.100.0/24
+            # --------------------------------------
             /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ {
               print
               next
             }
 
-            # -----------Accept IPv6 CIDR---------
+            # ------Plain IPv6 CIDR------------
+            # Example:  2001:db8::/32
+            # --------------------------------------
             /^[0-9A-Fa-f:]+\/[0-9]+$/ {
               print
               next
             }
 
-            # -------------Unsupported rule--------
+            # ------Unsupported rule----------
             # Stop the workflow to prevent
             # accidental incorrect conversion.
             # --------------------------------------
             {
-              print "ERROR: Unsupported IP-CIDR rule:"
-              print $0
+              print "ERROR: Unsupported IP-CIDR rule:" > "/dev/stderr"
+              print $0 > "/dev/stderr"
               exit 1
             }
-          ' tmp/CustomAD-ipcidr.list > tmp/CustomAD-ipcidr.txt
 
+          ' tmp/CustomAD-ipcidr.list > tmp/CustomAD-ipcidr.txt
           test -s tmp/CustomAD-ipcidr.txt
           echo ""
           echo "=========================================="
-          echo "Converted IP-CIDR text"
+          echo "Converted standard CIDR text"
           echo "=========================================="
           cat tmp/CustomAD-ipcidr.txt
           echo ""
