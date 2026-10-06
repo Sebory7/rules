@@ -2,19 +2,23 @@ name: Sync Loyalsoldier Rules to MRS
 
 on:
   schedule:
-    - cron: "30 3 * * *"
-
+    - cron: "43 4 * * *"
+    # run at 4:43
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: sync-loyal-direct-mrs
+  cancel-in-progress: false
+  # Prevent multiple runs from pushing to main at the same time
 
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
-
       # ==========================================
       # 1. Checkout
       # ==========================================
@@ -32,8 +36,8 @@ jobs:
           key: mihomo-linux-amd64-compatible-
           restore-keys: |
             mihomo-linux-amd64-compatible-
-      # =======Search for this prefix to find the latest Cache==========
 
+      # ======= Search for this prefix to find the latest Cache ==========
       # 3. Download Mihomo only if Cache is missing
       # ==========================================
       - name: Download latest Mihomo
@@ -45,29 +49,24 @@ jobs:
           set -e
 
           mkdir -p .mihomo
-
           VERSION=$(curl -fsSL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
             | jq -r '.tag_name')
-
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
             echo "ERROR: Failed to get Mihomo version."
             exit 1
           fi
-
           echo "Latest Mihomo: $VERSION"
-
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
           echo "Download URL: $URL"
-
-          curl -fL --retry 3 --retry-delay 2 "$URL" -o .mihomo/mihomo.gz
-
+          curl -fL --retry 3 --retry-delay 2 \
+            "$URL" \
+            -o .mihomo/mihomo.gz
           test -s .mihomo/mihomo.gz
           gunzip -f .mihomo/mihomo.gz
           chmod +x .mihomo/mihomo
-
           .mihomo/mihomo -v
 
       # ==========================================
@@ -77,9 +76,7 @@ jobs:
         shell: bash
         run: |
           set -e
-
           test -x .mihomo/mihomo
-
           .mihomo/mihomo -v
 
       # ==========================================
@@ -89,7 +86,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
           mkdir -p tmp
           mkdir -p ruleset
 
@@ -100,7 +96,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
           curl -fL \
             --retry 3 \
             --retry-delay 2 \
@@ -108,35 +103,40 @@ jobs:
             -o tmp/direct.txt
 
           test -s tmp/direct.txt
-
-          echo "direct.txt downloaded."
-
+          # Verify that the downloaded file
+          # is still the expected YAML ruleset.
+          if ! grep -q '^payload:' tmp/direct.txt; then
+            echo "ERROR: direct.txt does not contain the expected payload:"
+            exit 1
+          fi
+          if ! grep -Eq '^[[:space:]]*-[[:space:]]+' tmp/direct.txt; then
+            echo "ERROR: No YAML rule entries found in direct.txt."
+            exit 1
+          fi
+          echo "direct.txt downloaded and format check passed."
           echo "File size:"
           ls -lh tmp/direct.txt
-
           echo "First lines:"
           head -20 tmp/direct.txt
 
       # ==========================================
       # 7. Convert TXT -> MRS
+      # direct.txt is actually a 【YAML】-format
+      # domain ruleset, so use: domain + yaml
+      # No manual AWK conversion is required.
       # ==========================================
       - name: Convert direct.txt to MRS
         shell: bash
         run: |
           set -e
-
           rm -f ruleset/direct.mrs
-
           .mihomo/mihomo convert-ruleset \
             domain \
             yaml \
             tmp/direct.txt \
             ruleset/direct.mrs
-
           test -s ruleset/direct.mrs
-
           echo "MRS generated successfully."
-
           ls -lh ruleset/direct.mrs
 
       # ==========================================
@@ -146,18 +146,15 @@ jobs:
         shell: bash
         run: |
           set -e
-
           if [ ! -s ruleset/direct.mrs ]; then
             echo "ERROR: ruleset/direct.mrs is empty or missing!"
             exit 1
           fi
-
           echo "direct.mrs validation passed."
-
           ls -lh ruleset/direct.mrs
 
       # ==========================================
-      # 9. Commit and push
+      # 9. Commit changes
       # ==========================================
       - name: Commit changes
         shell: bash
@@ -166,15 +163,29 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add ruleset/direct.mrs
-
           if git diff --cached --quiet; then
             echo "ruleset/direct.mrs has not changed."
             exit 0
           fi
-
           git commit \
             -m "chore: update direct.mrs"
 
-          git push
+      # ==========================================
+      # 10. Sync remote main
+      # ============Preventing Git Branch History Conflicts==============
+      - name: Sync with remote
+        shell: bash
+        run: |
+          set -e
+          git fetch origin main
+          git rebase origin/main
+
+      # ==========================================
+      # 11. Push
+      # ==========================================
+      - name: Push changes
+        shell: bash
+        run: |
+          set -e
+          git push origin HEAD:main
