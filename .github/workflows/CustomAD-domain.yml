@@ -114,6 +114,7 @@ jobs:
       # ==============Convert Domain Name to a Wildcard==========
       #
       # +.example.com -> +.example.com
+      # *.example.com -> *.example.com
       # example.com -> example.com
       #
       # Comments and empty lines -> DELETE from MRS input
@@ -198,6 +199,14 @@ jobs:
             # +.example.com -> +.example.com
             # --------------------------------------
             /^\+\./ {
+              print
+              next
+            }
+
+            # -----------Wildcard domain-------------
+            # *.example.com -> *.example.com
+            # --------------------------------------
+            /^\*\./ {
               print
               next
             }
