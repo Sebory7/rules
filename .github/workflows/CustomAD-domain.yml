@@ -1,4 +1,4 @@
-name: Sync CustomAD Rules to MRS
+name: Sync CustomAD Domain Rules to MRS
 
 on:
   schedule:
