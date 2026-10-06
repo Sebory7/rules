@@ -118,6 +118,7 @@ jobs:
       # DOMAIN,example.com -> example.com
       # DOMAIN-KEYWORD,example -> DELETE
       # +.example.com -> +.example.com
+      # *.example.com -> *.example.com
       # example.com ->  example.com
       # Comments and empty lines ->  DELETE from MRS input
       #
@@ -141,21 +142,18 @@ jobs:
               # Trim leading/trailing whitespace
               gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
             }
-            # --------------------------------------
-            # Ignore comments
-            # --------------------------------------
+
+            # ------------Ignore comments---------
             /^[[:space:]]*#/ {
               next
             }
-            # --------------------------------------
-            # Ignore empty lines
-            # --------------------------------------
+
+            # ------------Ignore empty lines-----
             /^[[:space:]]*$/ {
               next
             }
+
             # ----------------DOMAIN-SUFFIX--------
-            # 
-            #
             # DOMAIN-SUFFIX,example.com -> +.example.com
             # DOMAIN-SUFFIX,example.com,Proxy -> +.example.com
             # --------------------------------------
@@ -201,6 +199,14 @@ jobs:
             # +.example.com -> +.example.com
             # --------------------------------------
             /^\+\./ {
+              print
+              next
+            }
+
+            # -----------Wildcard domain-------------
+            # *.example.com -> *.example.com
+            # --------------------------------------
+            /^\*\./ {
               print
               next
             }
