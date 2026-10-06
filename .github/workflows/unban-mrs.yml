@@ -2,19 +2,23 @@ name: Sync UnBan Rules to MRS
 
 on:
   schedule:
-    - cron: "30 0 * * *"
-
+    - cron: "42 3 * * *"
+    # run at 3:42
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: sync-unban-mrs
+  cancel-in-progress: false
+  # Prevent multiple runs from pushing to main at the same time
 
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
-
       # ==========================================
       # 1. Checkout
       # ==========================================
@@ -22,7 +26,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ==========================================
-      # 2. Restore Mihomo from Cache
+      # 2. Restore existing Mihomo
       # ==========================================
       - name: Restore Mihomo from Cache
         id: mihomo-cache
@@ -33,8 +37,8 @@ jobs:
           restore-keys: |
             mihomo-linux-amd64-compatible-
 
-      # ==========================================
-      # 3. Download latest Mihomo if Cache missing
+      # ======= Search for this prefix to find the latest Cache ==========
+      # 3. Download Mihomo only if Cache is missing
       # ==========================================
       - name: Download latest Mihomo
         if: steps.mihomo-cache.outputs.cache-matched-key == ''
@@ -45,29 +49,24 @@ jobs:
           set -e
 
           mkdir -p .mihomo
-
           VERSION=$(curl -fsSL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
             | jq -r '.tag_name')
-
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
             echo "ERROR: Failed to get Mihomo version."
             exit 1
           fi
-
           echo "Latest Mihomo: $VERSION"
-
           URL="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
           echo "Download URL: $URL"
-
-          curl -fL --retry 3 --retry-delay 2 "$URL" -o .mihomo/mihomo.gz
-
+          curl -fL --retry 3 --retry-delay 2 \
+            "$URL" \
+            -o .mihomo/mihomo.gz
           test -s .mihomo/mihomo.gz
           gunzip -f .mihomo/mihomo.gz
           chmod +x .mihomo/mihomo
-
           .mihomo/mihomo -v
 
       # ==========================================
@@ -77,7 +76,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
           test -x .mihomo/mihomo
           .mihomo/mihomo -v
 
@@ -88,9 +86,8 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          mkdir -p ruleset
           mkdir -p tmp
+          mkdir -p ruleset
 
       # ==========================================
       # 6. Download ACL4SSR UnBan.list
@@ -99,142 +96,212 @@ jobs:
         shell: bash
         run: |
           set -e
-
           curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
             "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/UnBan.list" \
             -o tmp/UnBan.list
-
           test -s tmp/UnBan.list
-
-          echo "========== UnBan.list =========="
-          cat tmp/UnBan.list
+          echo "UnBan.list downloaded."
+          echo "File size:"
+          ls -lh tmp/UnBan.list
+          echo "First lines:"
+          head -30 tmp/UnBan.list
 
       # ==========================================
-      # 7. Convert ACL4SSR rules
-      #    DOMAIN        -> full:example.com
-      #    DOMAIN-SUFFIX -> +.example.com
+      # 7. Prepare domain rules
+      # ==============Convert ACL4SSR Rules========
+      # DOMAIN-SUFFIX,example.com -> +.example.com
+      # DOMAIN,example.com -> example.com
+      # DOMAIN,example.com -> full:example.com
+      # DOMAIN,example.com,DIRECT -> full:example.com
+      # Comments and empty lines -> DELETE from MRS input
+      #
+      # Original comments remain preserved
+      # in the downloaded .list file.
+      # Other unsupported rules -> ERROR
       # ==========================================
-      - name: Convert UnBan.list to Mihomo domain format
+      - name: Prepare domain rules
         shell: bash
         run: |
           set -e
+          rm -f tmp/UnBan.domain.txt
+          rm -f ruleset/UnBan.mrs
 
           awk -F',' '
-            /^[[:space:]]*DOMAIN-SUFFIX,/ {
-              gsub(/\r/, "", $2)
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+            {
+              # Remove CR from Windows-style line endings
+              sub(/\r$/, "", $0)
+              # Trim leading/trailing whitespace
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+            }
 
-              if ($2 != "")
-                print "+." $2
-
+            # ------------Ignore comments---------
+            /^[[:space:]]*#/ {
               next
             }
 
-            /^[[:space:]]*DOMAIN,/ {
-              gsub(/\r/, "", $2)
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
-
-              if ($2 != "")
-                print "full:" $2
-
+            # ------------Ignore empty lines-----
+            /^[[:space:]]*$/ {
               next
             }
+
+            # ----------------DOMAIN-SUFFIX--------
+            # DOMAIN-SUFFIX,example.com -> +.example.com
+            # DOMAIN-SUFFIX,example.com,Direct -> +.example.com
+            # --------------------------------------
+            $1 == "DOMAIN-SUFFIX" {
+              domain = $2
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", domain)
+              if (domain == "") {
+                print "WARNING: Empty DOMAIN-SUFFIX rule skipped:" > "/dev/stderr"
+                print $0 > "/dev/stderr"
+                next
+              }
+              print "+." domain
+              next
+            }
+
+            # --------------DOMAIN----------------
+            # DOMAIN,example.com -> full:example.com
+            # DOMAIN,example.com,DIRECT -> full:example.com
+            # --------------------------------------
+            $1 == "DOMAIN" {
+              domain = $2
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", domain)
+              if (domain == "") {
+                print "WARNING: Empty DOMAIN rule skipped:" > "/dev/stderr"
+                print $0 > "/dev/stderr"
+                next
+              }
+              print "full:" domain
+              next
+            }
+
+            # -------------DOMAIN-KEYWORD------------
+            # Not used by current UnBan.list.
+            # Do NOT convert to wildcard.
+            # Delete directly if encountered.
+            # --------------------------------------
+            $1 == "DOMAIN-KEYWORD" {
+              print "INFO: Removing DOMAIN-KEYWORD rule:" > "/dev/stderr"
+              print $0 > "/dev/stderr"
+              next
+            }
+
+            # -----------Wildcard suffix domain-------------
+            # +.example.com -> +.example.com
+            # --------------------------------------
+            /^\+\./ {
+              print
+              next
+            }
+
+            # -----------Wildcard domain-------------
+            # *.example.com -> *.example.com
+            # --------------------------------------
+            /^\*\./ {
+              print
+              next
+            }
+
+            # -----------Plain domain--------------
+            # example.com -> example.com
+            # Also accepts subdomains: www.example.com
+            # --------------------------------------
+            /^[A-Za-z0-9]/ {
+              print
+              next
+            }
+
+            # -----------Any other rule type----------------
+            # Stop the workflow to prevent
+            # accidental incorrect conversion.
+            # --------------------------------------
+            {
+              print "ERROR: Unsupported rule:"
+              print $0
+              exit 1
+            }
+
           ' tmp/UnBan.list > tmp/UnBan.domain.txt
 
           test -s tmp/UnBan.domain.txt
-
-          echo "========== Converted rules =========="
+          echo ""
+          echo "=========================================="
+          echo "Converted domain text"
+          echo "=========================================="
           cat tmp/UnBan.domain.txt
-
-          echo "====================================="
-          echo "Rule count:"
+          echo ""
+          echo "=========================================="
+          echo "Rule count"
+          echo "=========================================="
           wc -l tmp/UnBan.domain.txt
 
       # ==========================================
-      # 8. Convert domain text to MRS
+      # 8. Convert domain text -> MRS
       # ==========================================
-      - name: Convert to MRS
+      - name: Convert domain text to MRS
         shell: bash
         run: |
           set -e
-
-          rm -f ruleset/UnBan.mrs
 
           .mihomo/mihomo convert-ruleset \
             domain \
             text \
             tmp/UnBan.domain.txt \
             ruleset/UnBan.mrs
-
           test -s ruleset/UnBan.mrs
-
-          echo "========== Generated MRS =========="
+          echo "MRS generated successfully."
           ls -lh ruleset/UnBan.mrs
 
       # ==========================================
-      # 9. Verify MRS
+      # 9. Validate
       # ==========================================
-      - name: Verify MRS
+      - name: Validate MRS
+        shell: bash
+        run: |
+          set -e
+          if [ ! -s ruleset/UnBan.mrs ]; then
+            echo "ERROR: ruleset/UnBan.mrs is empty or missing!"
+            exit 1
+          fi
+          echo "UnBan.mrs validation passed."
+          ls -lh ruleset/UnBan.mrs
+
+      # ==========================================
+      # 10. Commit changes
+      # ==========================================
+      - name: Commit changes
         shell: bash
         run: |
           set -e
 
-          if [ ! -f ruleset/UnBan.mrs ]; then
-            echo "ERROR: UnBan.mrs was not generated."
-            exit 1
-          fi
-
-          FILE_SIZE=$(stat -c%s ruleset/UnBan.mrs)
-
-          echo "UnBan.mrs size: ${FILE_SIZE} bytes"
-
-          if [ "$FILE_SIZE" -le 0 ]; then
-            echo "ERROR: UnBan.mrs is empty."
-            exit 1
-          fi
-
-      # ==========================================
-      # 10. Cleanup
-      # ==========================================
-      - name: Cleanup
-        shell: bash
-        run: |
-          rm -rf tmp
-
-      # ==========================================
-      # 11. Check changes
-      # ==========================================
-      - name: Check changes
-        id: changes
-        shell: bash
-        run: |
-          git add ruleset/UnBan.mrs
-
-          if git diff --cached --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes detected."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Changes detected."
-          fi
-
-      # ==========================================
-      # 12. Commit
-      # ==========================================
-      - name: Commit changes
-        if: steps.changes.outputs.changed == 'true'
-        shell: bash
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git commit -m "Update UnBan.mrs"
+          git add ruleset/UnBan.mrs
+          if git diff --cached --quiet; then
+            echo "ruleset/UnBan.mrs has not changed."
+            exit 0
+          fi
+          git commit \
+            -m "chore: update UnBan.mrs"
 
       # ==========================================
-      # 13. Push
-      # ==========================================
-      - name: Push changes
-        if: steps.changes.outputs.changed == 'true'
+      # 11. Sync remote main
+      # ============Preventing Git Branch History Conflicts==============
+      - name: Sync with remote
         shell: bash
         run: |
-          git push
+          set -e
+          git fetch origin main
+          git rebase origin/main
+
+      # ==========================================
+      # 12. Push
+      # ==========================================
+      - name: Push changes
+        shell: bash
+        run: |
+          set -e
+          git push origin HEAD:main
