@@ -118,7 +118,8 @@ jobs:
       # +.example.com -> +.example.com
       # *.example.com -> *.example.com
       # example.com -> example.com
-      # example.*.com -> example.*.com
+      # time.*.com -> time.*.com
+      # *.*.example.com -> *.*.example.com
       #
       # Comments and empty lines -> DELETE from MRS input
       # Original comments remain preserved
@@ -133,8 +134,8 @@ jobs:
           set -e
           rm -f 'tmp/fakeipfilter-no-cn.txt'
           rm -f 'ruleset/fakeipfilter-!cn.mrs'
-          awk '
 
+          awk '
             {
               # Remove CR from Windows-style line endings
               sub(/\r$/, "", $0)
@@ -170,12 +171,13 @@ jobs:
               next
             }
 
-            # -----Plain domain / wildcard domain---
+            # -----Other domain / wildcard domain---
             # example.com -> example.com
             # time.*.com -> time.*.com
             # xbox.*.*.microsoft.com
+            # *.*.xboxlive.com
             # --------------------------------------
-            /^[A-Za-z0-9]/ {
+            /^[A-Za-z0-9*]/ {
               print
               next
             }
@@ -197,11 +199,93 @@ jobs:
           echo "Converted domain text"
           echo "=========================================="
           cat 'tmp/fakeipfilter-no-cn.txt'
+
+
           echo ""
           echo "=========================================="
-          echo "Rule count"
+          echo "Rule count protection"
           echo "=========================================="
-          wc -l 'tmp/fakeipfilter-no-cn.txt'
+          # ==========================================
+          # Count current rules
+          # ==========================================
+          CURRENT_COUNT=$(wc -l < 'tmp/fakeipfilter-no-cn.txt')
+          echo "Current rule count: ${CURRENT_COUNT}"
+          # ==========================================
+          # Minimum absolute rule count
+          # Prevent empty or severely incomplete
+          # upstream lists from being converted.
+          # ==========================================
+          MIN_RULE_COUNT=10
+          if [ "$CURRENT_COUNT" -lt "$MIN_RULE_COUNT" ]; then
+            echo ""
+            echo "ERROR: Current rule count is too low!"
+            echo "Current:  ${CURRENT_COUNT}"
+            echo "Minimum:  ${MIN_RULE_COUNT}"
+            echo ""
+            echo "The workflow will stop to prevent"
+            echo "an abnormal MRS update."
+            exit 1
+          fi
+          echo "Minimum rule count check passed."
+
+          # ==========================================
+          # Compare with previous MRS
+          # Previous MRS is taken directly from
+          # the current Git HEAD.
+          # No .count file is required.
+          # ==========================================
+          PREVIOUS_MRS='ruleset/fakeipfilter-!cn.mrs'
+          PREVIOUS_TXT='tmp/fakeipfilter-previous.txt'
+          if git cat-file -e "HEAD:${PREVIOUS_MRS}" 2>/dev/null; then
+            echo ""
+            echo "Previous MRS found in Git."
+            # Extract the previous MRS from Git HEAD
+            git show "HEAD:${PREVIOUS_MRS}" > /tmp/fakeipfilter-previous.mrs
+            test -s /tmp/fakeipfilter-previous.mrs
+
+            # Convert previous MRS back to text
+            .mihomo/mihomo convert-ruleset \
+              domain \
+              mrs \
+              /tmp/fakeipfilter-previous.mrs \
+              "$PREVIOUS_TXT"
+            test -s "$PREVIOUS_TXT"
+            # Count previous rules
+            PREVIOUS_COUNT=$(wc -l < "$PREVIOUS_TXT")
+            echo "Previous rule count: ${PREVIOUS_COUNT}"
+
+            # ==========================================
+            # 70% protection
+            # Current rule count must be at least
+            # 70% of the previous rule count.
+            # ==========================================
+            MIN_ALLOWED=$((PREVIOUS_COUNT * 70 / 100))
+            echo "Minimum allowed count: ${MIN_ALLOWED}"
+            echo "Required ratio: 70%"
+            if [ "$CURRENT_COUNT" -lt "$MIN_ALLOWED" ]; then
+              echo ""
+              echo "=========================================="
+              echo "ERROR: Abnormal rule count decrease!"
+              echo "=========================================="
+              echo "Previous: ${PREVIOUS_COUNT}"
+              echo "Current:  ${CURRENT_COUNT}"
+              echo "Minimum:  ${MIN_ALLOWED}"
+              echo "Allowed ratio: 70%"
+              echo ""
+              echo "The workflow will stop to prevent"
+              echo "an abnormal MRS update."
+              exit 1
+            fi
+            echo ""
+            echo "Rule count comparison passed."
+            echo "Current / Previous:"
+            echo "${CURRENT_COUNT} / ${PREVIOUS_COUNT}"
+          else
+            echo ""
+            echo "No previous MRS found in Git HEAD."
+            echo "Skipping historical rule-count comparison."
+            echo "Minimum rule count protection remains enabled."
+          fi
 
       # ==========================================
       # 8. Convert domain text -> MRS
